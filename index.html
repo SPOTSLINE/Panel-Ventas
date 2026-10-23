@@ -6255,6 +6255,8 @@ html[data-login="ok"] .asis-fab { display: flex; }
 .asis-btn[disabled] { opacity: .6; cursor: wait; }
 .asis-lista { display: flex; align-items: center; gap: 12px; }
 .asis-lista > div { flex: 1; min-width: 0; }
+.asis-tipo { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; color: #fff; background: #b3261e; }
+.asis-tipo.xls { background: #1d6f42; }
 .asis-err { color: #b42318; font-size: 13px; }
 @media (max-width: 860px) {
   .asis-fab { left: 16px; }
@@ -6428,7 +6430,7 @@ const Asistente = (function () {
     pintar();
   }
 
-  // ─── Listas de precios (PDF de Documentos de Odoo) ───
+  // ─── Listas de precios (PDF y Excel de Documentos de Odoo) ───
   async function vistaListas() {
     body.innerHTML = volver + '<div class="asis-msg">Estas son las listas vigentes, tal como están en Odoo:</div><div class="asis-res" id="asis-res"><div class="asis-nota">Buscando listas…</div></div>';
     const res = $('#asis-res');
@@ -6440,9 +6442,10 @@ const Asistente = (function () {
       return;
     }
     if (!listas.length) { res.innerHTML = '<div class="asis-nota">Todavía no hay listas cargadas.</div>'; return; }
+    const extDe = (l) => String(l.ext || (String(l.archivo || '').split('.').pop()) || 'pdf').toLowerCase();
     res.innerHTML = listas.map((l, i) => `
       <div class="asis-item asis-lista">
-        <div><div class="n">${esc(l.nombre)}</div><div class="c">Actualizada ${esc(fecha(l.actualizado))} · ${(l.bytes / 1e6).toFixed(1)} MB</div></div>
+        <div><div class="n"><span class="asis-tipo ${extDe(l) === 'pdf' ? '' : 'xls'}">${extDe(l) === 'pdf' ? 'PDF' : 'EXCEL'}</span>${esc(l.nombre)}</div><div class="c">Actualizada ${esc(fecha(l.actualizado))} · ${(l.bytes / 1e6).toFixed(1)} MB</div></div>
         <button type="button" class="asis-btn" data-lista="${i}">⬇ Bajar</button>
       </div>`).join('');
     res.addEventListener('click', async (e) => {
@@ -6452,7 +6455,7 @@ const Asistente = (function () {
       b.disabled = true; b.textContent = 'Abriendo…';
       try {
         const { data, error } = await window.SB.storage.from('datos')
-          .createSignedUrl('compartido/listas/' + l.archivo, 120, { download: l.nombre + '.pdf' });
+          .createSignedUrl('compartido/listas/' + l.archivo, 120, { download: l.nombre + '.' + extDe(l) });
         if (error) throw error;
         const a = document.createElement('a');
         a.href = data.signedUrl; a.rel = 'noopener';
@@ -6883,6 +6886,5 @@ html.simulando .sidebar { border-top: 38px solid var(--yellow); }
   caja.hidden = false;
 })();
 </script>
-<script src="/Paneldepaneles/volver.js" defer></script>
 </body>
 </html>
