@@ -390,6 +390,11 @@ html[data-login="verificando"] #login .login-logo { animation: latido 1.2s ease-
   #section-venta .filters-section { padding: 14px; }
 }
 .nav-item.salir { color: rgba(255,255,255,.4); font-size: 12.5px; margin-top: 8px; }
+/* Volver a la portada del Panel de Paneles */
+a.nav-item.nav-volver { text-decoration: none; color: var(--yellow); font-size: 12.5px; padding: 8px 20px 12px; }
+a.nav-item.nav-volver .ic { font-size: 20px; line-height: 1; }
+a.nav-item.nav-volver:hover { color: #fff; }
+a.nav-item.nav-volver:focus-visible { outline: 2px solid var(--yellow); outline-offset: -2px; }
 </style>
 
 <title>Spotsline — Panel de Ventas</title>
@@ -971,6 +976,7 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
   <div class="vc-aviso" id="vc-aviso" hidden role="status"></div>
   <div class="sidebar" id="sidebar">
     <div class="sidebar-logo"><img src="assets/spotsline-logo-amarillo.png" alt="Spotsline"></div>
+    <a class="nav-item nav-volver" id="nav-volver" href="/Paneldepaneles/" title="Volver al Panel de Paneles"><span class="ic">‹</span> Panel de Paneles</a>
     <div class="sidebar-divider"></div>
     <div class="nav-item active" data-section="panel"><span class="ic">🏠</span> Panel General</div>
     <div class="nav-item" data-section="venta"><span class="ic">📈</span> Venta</div>
@@ -6587,6 +6593,7 @@ const Asistente = (function () {
 #section-stock .st-btn { font:inherit; font-size:12.5px; font-weight:700; background:var(--card-dark-2); color:#fff;
   border:1px solid var(--border-dark); border-radius:8px; padding:8px 14px; cursor:pointer; margin-left:auto; }
 #section-stock .st-btn:hover { border-color:var(--yellow); }
+#section-stock .st-btn:disabled { opacity:.6; cursor:progress; }
 #section-stock button:focus-visible, #section-stock select:focus-visible, #section-stock input:focus-visible, #section-stock th[data-orden]:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }
 #section-stock .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:22px; }
 #section-stock .kpi { background:#fff; border:1px solid #e2e6ef; border-radius:10px; padding:16px 18px; border-left:3px solid var(--yellow); }
@@ -6676,7 +6683,8 @@ const Asistente = (function () {
       ${empresas.length > 1 ? `<select id="st-empresa" aria-label="Empresa"><option value="">Todas las empresas</option>${empresas.map(e => `<option ${e === estado.empresa ? 'selected' : ''}>${esc(e)}</option>`).join('')}</select>` : ''}
       <select id="st-categoria" aria-label="Categoría"><option value="">Todas las categorías</option>${categorias.map(c => `<option ${c === estado.categoria ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
       <div class="st-seg" role="group" aria-label="Qué artículos mostrar">${vistas.map(([v, t]) => `<button type="button" data-vista="${v}" aria-pressed="${estado.vista === v}">${t}</button>`).join('')}</div>
-      <button type="button" class="st-btn" id="st-excel">📥 Descargar Excel</button>`;
+      <button type="button" class="st-btn" id="st-excel">📥 Descargar Excel</button>
+      <button type="button" class="st-btn" id="st-pdf" title="Catálogo en PDF con foto, solo de los artículos con disponible, según los filtros de empresa, categoría y búsqueda">📄 PDF con fotos</button>`;
     $('st-buscar').addEventListener('input', e => { estado.texto = e.target.value; render(); });
     if ($('st-empresa')) $('st-empresa').addEventListener('change', e => { estado.empresa = e.target.value; render(); });
     $('st-categoria').addEventListener('change', e => { estado.categoria = e.target.value; render(); });
@@ -6686,6 +6694,7 @@ const Asistente = (function () {
       render();
     }));
     $('st-excel').addEventListener('click', descargar);
+    $('st-pdf').addEventListener('click', generarPDF);
   }
 
   // Filtra por empresa, categoría y texto (sin la vista), para los números de arriba
@@ -6830,6 +6839,143 @@ const Asistente = (function () {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(datos), 'Stock');
     XLSX.writeFile(wb, nombre + '.xlsx');
+  }
+
+  // ── PDF con fotos: solo lo DISPONIBLE (disponible > 0), respetando empresa, categoría y búsqueda ──
+  let generando = false;
+  function cargarScript(src) {
+    return new Promise((ok, mal) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = ok; s.onerror = () => mal(new Error('No se pudo cargar ' + src));
+      document.head.appendChild(s);
+    });
+  }
+  // Baja la foto y la achica a JPEG (así el PDF no pesa una tonelada)
+  async function fotoJPEG(url, max) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('foto ' + resp.status);
+    const blob = await resp.blob();
+    let fuente;
+    if (window.createImageBitmap) fuente = await createImageBitmap(blob);
+    else fuente = await new Promise((ok, mal) => { const im = new Image(); im.onload = () => ok(im); im.onerror = mal; im.src = URL.createObjectURL(blob); });
+    const w0 = fuente.width, h0 = fuente.height;
+    const k = Math.min(1, max / Math.max(w0, h0));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w0 * k)); c.height = Math.max(1, Math.round(h0 * k));
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(fuente, 0, 0, c.width, c.height);
+    if (fuente.close) fuente.close();
+    return { data: c.toDataURL('image/jpeg', 0.8), w: c.width, h: c.height };
+  }
+  function logoSidebar() {
+    try {
+      const im = document.querySelector('.sidebar-logo img');
+      if (!im || !im.complete || !im.naturalWidth) return null;
+      const c = document.createElement('canvas');
+      c.width = im.naturalWidth; c.height = im.naturalHeight;
+      c.getContext('2d').drawImage(im, 0, 0);
+      return { data: c.toDataURL('image/png'), w: c.width, h: c.height };
+    } catch (e) { return null; }
+  }
+
+  async function generarPDF() {
+    if (generando) return;
+    const filas = filtrarBase().filter(r => r.disponible > 0).sort((a, b) =>
+      String(a.categoria || '').localeCompare(String(b.categoria || ''), 'es') || String(a.producto || '').localeCompare(String(b.producto || ''), 'es'));
+    if (!filas.length) return alert('No hay artículos con disponible para estos filtros.');
+    if (filas.length > 400 && !confirm(`Son ${fN(filas.length)} artículos: el PDF puede tardar un par de minutos. ¿Seguimos? (Podés achicarlo eligiendo una categoría o buscando.)`)) return;
+    const btn = $('st-pdf'), txt = btn.textContent;
+    const aviso = (t) => { btn.textContent = t; };
+    generando = true; btn.disabled = true;
+    try {
+      aviso('Preparando…');
+      if (!window.jspdf) await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+
+      // 1) Links firmados de las fotos, de a 100
+      const conFoto = filas.filter(r => r.img && !URL_IMG[r.producto_id]);
+      for (let i = 0; i < conFoto.length; i += 100) {
+        const tanda = conFoto.slice(i, i + 100);
+        try {
+          const { data } = await window.SB.storage.from('datos').createSignedUrls(tanda.map(r => 'compartido/img/' + r.producto_id), 3600);
+          (data || []).forEach((d, j) => { if (d && d.signedUrl) URL_IMG[tanda[j].producto_id] = d.signedUrl; });
+        } catch (e) { /* sin foto para esa tanda */ }
+      }
+      // 2) Bajar y achicar las fotos, de a 6 a la vez
+      const FOTO = {};
+      const cola = filas.filter(r => r.img && URL_IMG[r.producto_id]);
+      let hechas = 0, pos = 0;
+      async function trabajador() {
+        while (pos < cola.length) {
+          const r = cola[pos++];
+          try { FOTO[r.producto_id] = await fotoJPEG(URL_IMG[r.producto_id], 420); } catch (e) { /* queda sin foto */ }
+          aviso(`Fotos ${++hechas}/${cola.length}…`);
+        }
+      }
+      await Promise.all(Array.from({ length: 6 }, trabajador));
+
+      // 3) Armar el PDF: A4 vertical, 3 columnas x 4 filas
+      aviso('Armando PDF…');
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+      const W = 210, H = 297, M = 12, GAP = 5, COLS = 3, FILAS_PAG = 4;
+      const TOP = 30, BOT = 12;
+      const cw = (W - 2 * M - GAP * (COLS - 1)) / COLS;
+      const ch = (H - TOP - BOT - GAP * (FILAS_PAG - 1)) / FILAS_PAG;
+      const fotoH = ch - 25;
+      const hoy = new Date().toLocaleDateString('es-AR');
+      const filtros = [estado.empresa, estado.categoria, estado.texto && ('“' + estado.texto + '”')].filter(Boolean).join(' · ');
+      const logo = logoSidebar();
+      const porPag = COLS * FILAS_PAG, paginas = Math.ceil(filas.length / porPag);
+      const limpio = (t) => String(t || '').replace(/^\[[^\]]*\]\s*/, '');
+
+      function encabezado(n) {
+        doc.setFillColor(20, 20, 20); doc.rect(0, 0, W, 22, 'F');
+        if (logo) { const lh = 7, lw = lh * logo.w / logo.h; doc.addImage(logo.data, 'PNG', M, 7.5, lw, lh); }
+        else { doc.setTextColor(245, 196, 0); doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text('SPOTSLINE', M, 13.5); }
+        doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
+        doc.text('Stock disponible', W - M, 10.5, { align: 'right' });
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(200, 200, 200);
+        doc.text(`${hoy} · ${fN(filas.length)} artículos${filtros ? ' · ' + filtros : ''}`, W - M, 16, { align: 'right' });
+        doc.setFontSize(7.5); doc.setTextColor(140, 140, 140);
+        doc.text('Disponible = stock físico menos lo comprometido en pedidos. Sujeto a confirmación.', M, H - 6);
+        doc.text(`Página ${n} de ${paginas}`, W - M, H - 6, { align: 'right' });
+      }
+
+      filas.forEach((r, i) => {
+        const enPag = i % porPag;
+        if (enPag === 0) { if (i) doc.addPage(); encabezado(i / porPag + 1); }
+        const x = M + (enPag % COLS) * (cw + GAP);
+        const y = TOP + Math.floor(enPag / COLS) * (ch + GAP);
+        doc.setDrawColor(226, 230, 239); doc.setLineWidth(0.3); doc.roundedRect(x, y, cw, ch, 2, 2, 'S');
+        // Foto centrada dentro de su caja
+        const f = FOTO[r.producto_id];
+        const bx = x + 2, by = y + 2, bw = cw - 4, bh = fotoH - 2;
+        if (f) {
+          const k = Math.min(bw / f.w, bh / f.h), iw = f.w * k, ih = f.h * k;
+          doc.addImage(f.data, 'JPEG', bx + (bw - iw) / 2, by + (bh - ih) / 2, iw, ih);
+        } else {
+          doc.setFillColor(246, 246, 243); doc.rect(bx, by, bw, bh, 'F');
+          doc.setTextColor(170, 170, 170); doc.setFontSize(8); doc.text('Sin foto', bx + bw / 2, by + bh / 2, { align: 'center' });
+        }
+        // Textos
+        let ty = y + fotoH + 4;
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(120, 120, 120);
+        doc.text(doc.splitTextToSize([r.codigo, r.categoria].filter(Boolean).join(' · '), cw - 4)[0] || '', x + 2, ty);
+        ty += 3.8;
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(26, 29, 46);
+        const nombre = doc.splitTextToSize(limpio(r.producto), cw - 4).slice(0, 2);
+        doc.text(nombre, x + 2, ty);
+        doc.setFontSize(9.5); doc.setTextColor(21, 128, 61);
+        doc.text(`Disponible: ${fN(r.disponible)} ${r.unidad || ''}`.trim(), x + 2, y + ch - 3);
+      });
+
+      doc.save('stock_disponible_' + new Date().toISOString().slice(0, 10) + '.pdf');
+    } catch (e) {
+      alert('No se pudo generar el PDF: ' + (e && e.message ? e.message : e));
+    } finally {
+      generando = false; btn.disabled = false; btn.textContent = txt;
+    }
   }
 
   window.ST = { init: load };
