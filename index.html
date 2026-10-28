@@ -6594,6 +6594,22 @@ const Asistente = (function () {
   border:1px solid var(--border-dark); border-radius:8px; padding:8px 14px; cursor:pointer; margin-left:auto; }
 #section-stock .st-btn:hover { border-color:var(--yellow); }
 #section-stock .st-btn:disabled { opacity:.6; cursor:progress; }
+#section-stock .st-multi { position:relative; }
+#section-stock .st-multi-btn { font:inherit; font-size:13px; display:inline-flex; align-items:center; gap:10px; justify-content:space-between; min-width:220px; max-width:320px;
+  background:var(--card-dark-2); color:#fff; border:1px solid var(--border-dark); border-radius:8px; padding:8px 12px; cursor:pointer; text-align:left; }
+#section-stock .st-multi-btn span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#section-stock .st-multi-btn.activo, #section-stock .st-multi-btn[aria-expanded="true"] { border-color:var(--yellow); }
+#section-stock .st-multi-pop { position:absolute; z-index:40; top:calc(100% + 4px); left:0; width:min(420px, calc(100vw - 32px)); background:#2b2b2f; border:1px solid var(--border-dark);
+  border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.45); padding:10px; }
+#section-stock .st-multi-top { display:flex; gap:8px; }
+#section-stock .st-multi-top input { flex:1; min-width:0; font:inherit; font-size:13px; background:#1f1f22; color:#fff; border:1px solid var(--border-dark); border-radius:7px; padding:7px 10px; }
+#section-stock .st-multi-limpiar { font:inherit; font-size:12px; font-weight:700; background:transparent; color:var(--yellow); border:1px solid var(--border-dark); border-radius:7px; padding:0 10px; cursor:pointer; }
+#section-stock .st-multi-ayuda { font-size:11px; color:var(--muted-dark); margin:8px 2px 6px; }
+#section-stock .st-multi-lista { max-height:340px; overflow-y:auto; }
+#section-stock .st-multi-lista label { display:flex; align-items:center; gap:8px; padding:6px 6px; border-radius:6px; font-size:13px; color:#fff; cursor:pointer; }
+#section-stock .st-multi-lista label[hidden] { display:none; }
+#section-stock .st-multi-lista label:hover { background:rgba(255,255,255,.06); }
+#section-stock .st-multi-lista input { accent-color:var(--yellow); width:15px; height:15px; flex-shrink:0; }
 #section-stock button:focus-visible, #section-stock select:focus-visible, #section-stock input:focus-visible, #section-stock th[data-orden]:focus-visible { outline:2px solid var(--yellow); outline-offset:2px; }
 #section-stock .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:22px; }
 #section-stock .kpi { background:#fff; border:1px solid #e2e6ef; border-radius:10px; padding:16px 18px; border-left:3px solid var(--yellow); }
@@ -6640,7 +6656,7 @@ const Asistente = (function () {
   const LIMITE = 500;
   let TODO = [], META = {}, conCostos = false, FILAS = [], nCols = 0;
   const URL_IMG = {};   // producto_id -> link firmado (se pide una sola vez por sesión)
-  const estado = { empresa: '', categoria: '', texto: '', vista: 'disponible', orden: 'disponible', asc: false };
+  const estado = { empresa: '', categorias: [], texto: '', vista: 'disponible', orden: 'disponible', asc: false };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fN = (n) => (Math.round((n || 0) * 100) / 100).toLocaleString('es-AR', { maximumFractionDigits: 2 });
@@ -6676,18 +6692,55 @@ const Asistente = (function () {
     const empresas = [...new Set(TODO.map(r => r.empresa))].filter(Boolean).sort();
     const categorias = [...new Set(TODO.map(r => r.categoria))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'es'));
     if (!empresas.includes(estado.empresa)) estado.empresa = '';
-    if (!categorias.includes(estado.categoria)) estado.categoria = '';
+    estado.categorias = estado.categorias.filter(c => categorias.includes(c));
     const vistas = [['disponible', 'Con disponible'], ['faltante', 'Faltantes'], ['todos', 'Todos']];
     $('st-barra').innerHTML = `
       <input type="search" id="st-buscar" placeholder="Buscar artículo o código…" value="${esc(estado.texto)}" aria-label="Buscar artículo">
       ${empresas.length > 1 ? `<select id="st-empresa" aria-label="Empresa"><option value="">Todas las empresas</option>${empresas.map(e => `<option ${e === estado.empresa ? 'selected' : ''}>${esc(e)}</option>`).join('')}</select>` : ''}
-      <select id="st-categoria" aria-label="Categoría"><option value="">Todas las categorías</option>${categorias.map(c => `<option ${c === estado.categoria ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      <div class="st-multi" id="st-cat">
+        <button type="button" class="st-multi-btn" id="st-cat-btn" aria-haspopup="true" aria-expanded="false"><span id="st-cat-txt"></span><span aria-hidden="true">▾</span></button>
+        <div class="st-multi-pop" id="st-cat-pop" hidden>
+          <div class="st-multi-top">
+            <input type="search" id="st-cat-buscar" placeholder="Buscar categoría…" aria-label="Buscar categoría">
+            <button type="button" class="st-multi-limpiar" id="st-cat-limpiar">Todas</button>
+          </div>
+          <div class="st-multi-ayuda">Marcá una o varias. Si marcás una principal (ej. “Producto Terminado”), entran todas sus subcategorías.</div>
+          <div class="st-multi-lista" id="st-cat-lista">${categorias.map(c => `<label data-txt="${esc(norm(c))}"><input type="checkbox" value="${esc(c)}" ${estado.categorias.includes(c) ? 'checked' : ''}> <span>${esc(c)}</span></label>`).join('')}</div>
+        </div>
+      </div>
       <div class="st-seg" role="group" aria-label="Qué artículos mostrar">${vistas.map(([v, t]) => `<button type="button" data-vista="${v}" aria-pressed="${estado.vista === v}">${t}</button>`).join('')}</div>
       <button type="button" class="st-btn" id="st-excel">📥 Descargar Excel</button>
       <button type="button" class="st-btn" id="st-pdf" title="Catálogo en PDF con foto, solo de los artículos con disponible, según los filtros de empresa, categoría y búsqueda">📄 PDF con fotos</button>`;
     $('st-buscar').addEventListener('input', e => { estado.texto = e.target.value; render(); });
     if ($('st-empresa')) $('st-empresa').addEventListener('change', e => { estado.empresa = e.target.value; render(); });
-    $('st-categoria').addEventListener('change', e => { estado.categoria = e.target.value; render(); });
+    // Selector de categorías (varias a la vez)
+    const pop = $('st-cat-pop'), btnCat = $('st-cat-btn');
+    const rotular = () => {
+      const n = estado.categorias.length;
+      $('st-cat-txt').textContent = !n ? 'Todas las categorías' : n === 1 ? estado.categorias[0] : n + ' categorías';
+      btnCat.classList.toggle('activo', n > 0);
+      btnCat.title = n ? estado.categorias.join('\n') : '';
+    };
+    const abrir = (si) => { pop.hidden = !si; btnCat.setAttribute('aria-expanded', si); if (si) $('st-cat-buscar').focus(); };
+    rotular();
+    btnCat.addEventListener('click', () => abrir(pop.hidden));
+    $('st-cat-lista').addEventListener('change', () => {
+      estado.categorias = [...$('st-cat-lista').querySelectorAll('input:checked')].map(i => i.value);
+      rotular(); render();
+    });
+    $('st-cat-limpiar').addEventListener('click', () => {
+      $('st-cat-lista').querySelectorAll('input').forEach(i => { i.checked = false; });
+      estado.categorias = []; rotular(); render();
+    });
+    $('st-cat-buscar').addEventListener('input', e => {
+      const q = norm(e.target.value).trim();
+      $('st-cat-lista').querySelectorAll('label').forEach(l => { l.hidden = !!q && !l.dataset.txt.includes(q); });
+    });
+    if (!window.__stCatDoc) {   // cerrar al hacer clic afuera o con Escape (una sola vez)
+      window.__stCatDoc = true;
+      document.addEventListener('click', e => { const c = $('st-cat'); if (c && !c.contains(e.target) && !$('st-cat-pop').hidden) { $('st-cat-pop').hidden = true; $('st-cat-btn').setAttribute('aria-expanded', 'false'); } });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('st-cat-pop') && !$('st-cat-pop').hidden) { $('st-cat-pop').hidden = true; $('st-cat-btn').setAttribute('aria-expanded', 'false'); $('st-cat-btn').focus(); } });
+    }
     $('st-barra').querySelectorAll('[data-vista]').forEach(b => b.addEventListener('click', () => {
       estado.vista = b.dataset.vista;
       $('st-barra').querySelectorAll('[data-vista]').forEach(x => x.setAttribute('aria-pressed', x === b));
@@ -6701,7 +6754,7 @@ const Asistente = (function () {
   function filtrarBase() {
     const q = norm(estado.texto).trim();
     return TODO.filter(r => (!estado.empresa || r.empresa === estado.empresa)
-      && (!estado.categoria || r.categoria === estado.categoria)
+      && (!estado.categorias.length || estado.categorias.some(c => r.categoria === c || String(r.categoria || '').startsWith(c + ' / ')))
       && (!q || norm(r.producto).includes(q) || norm(r.codigo).includes(q)));
   }
   function filtrarVista(filas) {
@@ -6924,7 +6977,7 @@ const Asistente = (function () {
       const ch = (H - TOP - BOT - GAP * (FILAS_PAG - 1)) / FILAS_PAG;
       const fotoH = ch - 25;
       const hoy = new Date().toLocaleDateString('es-AR');
-      const filtros = [estado.empresa, estado.categoria, estado.texto && ('“' + estado.texto + '”')].filter(Boolean).join(' · ');
+      const filtros = [estado.empresa, estado.categorias.length > 2 ? estado.categorias.length + ' categorías' : estado.categorias.join(', '), estado.texto && ('“' + estado.texto + '”')].filter(Boolean).join(' · ');
       const logo = logoSidebar();
       const porPag = COLS * FILAS_PAG, paginas = Math.ceil(filas.length / porPag);
       const limpio = (t) => String(t || '').replace(/^\[[^\]]*\]\s*/, '');
