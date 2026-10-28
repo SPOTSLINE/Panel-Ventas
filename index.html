@@ -6655,7 +6655,12 @@ const Asistente = (function () {
 (function () {
   const LIMITE = 500;
   let TODO = [], META = {}, conCostos = false, conPrecios = false, FILAS = [], nCols = 0;
-  const fP = (n) => n ? '$ ' + Math.round(n).toLocaleString('es-AR') : '—';
+  // Los precios de lista de SPL están en dólares (así figuran en Odoo); los de Spotsline, en pesos
+  const esUSD = (r) => /\bSPL\b/i.test(String((r && r.empresa) || ''));
+  const moneda = (r) => esUSD(r) ? 'US$' : '$';
+  const fP = (n, r) => !n ? '—' : esUSD(r)
+    ? 'US$ ' + n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '$ ' + Math.round(n).toLocaleString('es-AR');
   // Mismo archivo que usa Spotty: compartido/precios_lista.json.gz (producto, categoría, precio_lista; sin costos)
   async function cargarPrecios() {
     try {
@@ -6832,7 +6837,7 @@ const Asistente = (function () {
         <td class="cat">${esc(r.categoria)}</td>${muestraEmpresa ? `<td class="cat">${esc(r.empresa)}</td>` : ''}
         <td class="num">${fN(r.fisico)}</td><td class="num">${fN(r.comprometido)}</td>
         <td class="num"><span class="disp ${cls}">${fN(r.disponible)}</span>${r.disponible < 0 ? '<span class="chip-falta">falta</span>' : ''}</td>
-        ${conPrecios ? `<td class="num">${fP(r.precio_lista)}</td>` : ''}
+        ${conPrecios ? `<td class="num">${fP(r.precio_lista, r)}</td>` : ''}
         ${conCostos ? `<td class="num">${fM(r.costo_unitario)}</td><td class="num">${fM(r.valor)}</td>` : ''}</tr>`;
     });
     html += '</tbody></table>';
@@ -6872,7 +6877,7 @@ const Asistente = (function () {
         ${dato('Código', esc(r.codigo || '—'))}${dato('Categoría', esc(r.categoria))}${dato('Empresa', esc(r.empresa))}
         ${dato('Físico', fN(r.fisico) + ' ' + esc(r.unidad || ''))}${dato('Comprometido', fN(r.comprometido))}
         ${dato('Disponible', fN(r.disponible))}${dato('Por entrar', fN(r.entrante))}
-        ${conPrecios ? dato('Precio de lista', fP(r.precio_lista)) : ''}
+        ${conPrecios ? dato('Precio de lista' + (esUSD(r) ? ' (dólares)' : ''), fP(r.precio_lista, r)) : ''}
         ${conCostos ? dato('Costo unitario', fM(r.costo_unitario)) + dato('Valor', fM(r.valor)) : ''}
       </div></div></td>`;
     tr.after(fila);
@@ -6902,7 +6907,7 @@ const Asistente = (function () {
     const datos = filas.map(r => {
       const o = { 'Código': r.codigo, 'Artículo': r.producto, 'Categoría': r.categoria, 'Empresa': r.empresa, 'Unidad': r.unidad,
         'Físico': r.fisico, 'Comprometido': r.comprometido, 'Disponible': r.disponible, 'Por entrar': r.entrante };
-      if (conPrecios) o['Precio de lista'] = r.precio_lista || '';
+      if (conPrecios) { o['Moneda'] = r.precio_lista ? moneda(r) : ''; o['Precio de lista'] = r.precio_lista || ''; }
       if (conCostos) { o['Costo unitario'] = r.costo_unitario; o['Valor'] = r.valor; }
       return o;
     });
@@ -7007,6 +7012,7 @@ const Asistente = (function () {
       const logo = logoSidebar();
       const porPag = COLS * FILAS_PAG, paginas = Math.ceil(filas.length / porPag);
       const limpio = (t) => String(t || '').replace(/^\[[^\]]*\]\s*/, '');
+      const hayUSD = filas.some(r => r.precio_lista && esUSD(r));
 
       function encabezado(n) {
         doc.setFillColor(20, 20, 20); doc.rect(0, 0, W, 22, 'F');
@@ -7017,7 +7023,7 @@ const Asistente = (function () {
         doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(200, 200, 200);
         doc.text(`${hoy} · ${fN(filas.length)} artículos${filtros ? ' · ' + filtros : ''}`, W - M, 16, { align: 'right' });
         doc.setFontSize(7.5); doc.setTextColor(140, 140, 140);
-        doc.text('Disponible = stock físico menos lo comprometido en pedidos. Precios de lista de Odoo. Sujeto a confirmación.', M, H - 6);
+        doc.text('Disponible = stock físico menos lo comprometido en pedidos. Precios de lista de Odoo' + (hayUSD ? ' (SPL en dólares, US$)' : '') + '. Sujeto a confirmación.', M, H - 6);
         doc.text(`Página ${n} de ${paginas}`, W - M, H - 6, { align: 'right' });
       }
 
@@ -7047,9 +7053,9 @@ const Asistente = (function () {
         doc.text(nombre, x + 2, ty);
         if (r.precio_lista) {
           doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(26, 29, 46);
-          doc.text('$ ' + Math.round(r.precio_lista).toLocaleString('es-AR'), x + cw - 2, y + ch - 3, { align: 'right' });
+          doc.text(fP(r.precio_lista, r), x + cw - 2, y + ch - 3, { align: 'right' });
           doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(120, 120, 120);
-          doc.text('Precio de lista', x + cw - 2, y + ch - 7.2, { align: 'right' });
+          doc.text(esUSD(r) ? 'Precio de lista en dólares' : 'Precio de lista', x + cw - 2, y + ch - 7.2, { align: 'right' });
         }
         doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(21, 128, 61);
         const uni = /^unidad/i.test(r.unidad || '') ? 'u.' : (r.unidad || '');
