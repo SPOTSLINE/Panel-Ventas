@@ -6654,7 +6654,25 @@ const Asistente = (function () {
 <script>
 (function () {
   const LIMITE = 500;
-  let TODO = [], META = {}, conCostos = false, FILAS = [], nCols = 0;
+  let TODO = [], META = {}, conCostos = false, conPrecios = false, FILAS = [], nCols = 0;
+  const fP = (n) => n ? '$ ' + Math.round(n).toLocaleString('es-AR') : '—';
+  // Mismo archivo que usa Spotty: compartido/precios_lista.json.gz (producto, categoría, precio_lista; sin costos)
+  async function cargarPrecios() {
+    try {
+      await window.perfilListo;
+      const { data, error } = await window.SB.storage.from('datos').download('compartido/precios_lista.json.gz');
+      if (error || !data) return {};
+      const bytes = new Uint8Array(await data.arrayBuffer());
+      let lista;
+      if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+        const flujo = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+        lista = JSON.parse(await new Response(flujo).text());
+      } else lista = JSON.parse(new TextDecoder().decode(bytes));
+      const m = {};
+      (Array.isArray(lista) ? lista : []).forEach(x => { if (x && x.producto) m[x.producto] = x.precio_lista; });
+      return m;
+    } catch (e) { return {}; }
+  }
   const URL_IMG = {};   // producto_id -> link firmado (se pide una sola vez por sesión)
   const estado = { empresa: '', categorias: [], texto: '', vista: 'disponible', orden: 'disponible', asc: false };
   const $ = (id) => document.getElementById(id);
@@ -6681,6 +6699,10 @@ const Asistente = (function () {
       TODO = datos;
       META = mR.ok ? await mR.json() : {};
       conCostos = TODO.some(r => 'costo_unitario' in r);
+      // Precio de lista (ficha del producto en Odoo): se cruza por el nombre del producto
+      const precios = await cargarPrecios();
+      TODO.forEach(r => { const v = precios[r.producto]; r.precio_lista = v > 0 ? v : null; });
+      conPrecios = TODO.some(r => r.precio_lista);
       armarBarra();
       render();
     } catch (e) {
@@ -6799,6 +6821,7 @@ const Asistente = (function () {
     const cols = [['producto', 'Artículo', ''], ['categoria', 'Categoría', '']]
       .concat(muestraEmpresa ? [['empresa', 'Empresa', '']] : [])
       .concat([['fisico', 'Físico', 'num'], ['comprometido', 'Comprometido', 'num'], ['disponible', 'Disponible', 'num']])
+      .concat(conPrecios ? [['precio_lista', 'Precio lista', 'num']] : [])
       .concat(conCostos ? [['costo_unitario', 'Costo unit.', 'num'], ['valor', 'Valor', 'num']] : []);
     html += `<div class="section-title">Detalle por artículo (${fN(filas.length)})</div><table><thead><tr>${cols.map(([k, t, c]) =>
       `<th class="${c}${estado.orden === k ? ' activa' : ''}" data-orden="${k}" tabindex="0" aria-sort="${estado.orden === k ? (estado.asc ? 'ascending' : 'descending') : 'none'}">${t}${estado.orden === k ? (estado.asc ? ' ▲' : ' ▼') : ''}</th>`).join('')}</tr></thead><tbody>`;
@@ -6809,6 +6832,7 @@ const Asistente = (function () {
         <td class="cat">${esc(r.categoria)}</td>${muestraEmpresa ? `<td class="cat">${esc(r.empresa)}</td>` : ''}
         <td class="num">${fN(r.fisico)}</td><td class="num">${fN(r.comprometido)}</td>
         <td class="num"><span class="disp ${cls}">${fN(r.disponible)}</span>${r.disponible < 0 ? '<span class="chip-falta">falta</span>' : ''}</td>
+        ${conPrecios ? `<td class="num">${fP(r.precio_lista)}</td>` : ''}
         ${conCostos ? `<td class="num">${fM(r.costo_unitario)}</td><td class="num">${fM(r.valor)}</td>` : ''}</tr>`;
     });
     html += '</tbody></table>';
@@ -6848,6 +6872,7 @@ const Asistente = (function () {
         ${dato('Código', esc(r.codigo || '—'))}${dato('Categoría', esc(r.categoria))}${dato('Empresa', esc(r.empresa))}
         ${dato('Físico', fN(r.fisico) + ' ' + esc(r.unidad || ''))}${dato('Comprometido', fN(r.comprometido))}
         ${dato('Disponible', fN(r.disponible))}${dato('Por entrar', fN(r.entrante))}
+        ${conPrecios ? dato('Precio de lista', fP(r.precio_lista)) : ''}
         ${conCostos ? dato('Costo unitario', fM(r.costo_unitario)) + dato('Valor', fM(r.valor)) : ''}
       </div></div></td>`;
     tr.after(fila);
@@ -6877,6 +6902,7 @@ const Asistente = (function () {
     const datos = filas.map(r => {
       const o = { 'Código': r.codigo, 'Artículo': r.producto, 'Categoría': r.categoria, 'Empresa': r.empresa, 'Unidad': r.unidad,
         'Físico': r.fisico, 'Comprometido': r.comprometido, 'Disponible': r.disponible, 'Por entrar': r.entrante };
+      if (conPrecios) o['Precio de lista'] = r.precio_lista || '';
       if (conCostos) { o['Costo unitario'] = r.costo_unitario; o['Valor'] = r.valor; }
       return o;
     });
@@ -6991,7 +7017,7 @@ const Asistente = (function () {
         doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(200, 200, 200);
         doc.text(`${hoy} · ${fN(filas.length)} artículos${filtros ? ' · ' + filtros : ''}`, W - M, 16, { align: 'right' });
         doc.setFontSize(7.5); doc.setTextColor(140, 140, 140);
-        doc.text('Disponible = stock físico menos lo comprometido en pedidos. Sujeto a confirmación.', M, H - 6);
+        doc.text('Disponible = stock físico menos lo comprometido en pedidos. Precios de lista de Odoo. Sujeto a confirmación.', M, H - 6);
         doc.text(`Página ${n} de ${paginas}`, W - M, H - 6, { align: 'right' });
       }
 
@@ -7019,8 +7045,15 @@ const Asistente = (function () {
         doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(26, 29, 46);
         const nombre = doc.splitTextToSize(limpio(r.producto), cw - 4).slice(0, 2);
         doc.text(nombre, x + 2, ty);
-        doc.setFontSize(9.5); doc.setTextColor(21, 128, 61);
-        doc.text(`Disponible: ${fN(r.disponible)} ${r.unidad || ''}`.trim(), x + 2, y + ch - 3);
+        if (r.precio_lista) {
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(26, 29, 46);
+          doc.text('$ ' + Math.round(r.precio_lista).toLocaleString('es-AR'), x + cw - 2, y + ch - 3, { align: 'right' });
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(120, 120, 120);
+          doc.text('Precio de lista', x + cw - 2, y + ch - 7.2, { align: 'right' });
+        }
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(21, 128, 61);
+        const uni = /^unidad/i.test(r.unidad || '') ? 'u.' : (r.unidad || '');
+        doc.text(`Disp.: ${fN(r.disponible)} ${uni}`.trim(), x + 2, y + ch - 3);
       });
 
       doc.save('stock_disponible_' + new Date().toISOString().slice(0, 10) + '.pdf');
