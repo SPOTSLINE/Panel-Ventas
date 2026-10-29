@@ -325,6 +325,7 @@ const SUPABASE_KEY = 'sb_publishable_zHONcBODl6nbPiLS3TSrZw_D8MVJqeE';      // e
 #section-clientes .cl-nota-sub { font-weight: 400; font-size: 11.5px; color: var(--muted); }
 #section-clientes .cl-rev-intro { font-size: 13px; color: var(--muted); margin: 4px 0 14px; }
 #section-clientes .cl-btn-rev[aria-pressed="true"] { background: var(--yellow); }
+#section-clientes .cl-vercompra { padding: 12px 18px 0 30px; border-left: 3px solid var(--yellow); }
 /* ═══ Pantalla de ingreso ═══ */
 #login { position: fixed; inset: 0; z-index: 100; background: var(--ink, #1D1D1F);
   display: flex; align-items: center; justify-content: center; padding: 24px; }
@@ -735,6 +736,25 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
   .filters { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px;
     display:flex; flex-wrap:wrap; gap:10px; align-items:flex-start; margin-bottom:20px; }
 #section-facturacion .filter-group { position:relative; }
+#section-facturacion .f-cli { position:relative; }
+#section-facturacion .f-cli input { font:inherit; font-size:13px; width:240px; max-width:100%; box-sizing:border-box; background:#fafbfd; border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:var(--text); }
+#section-facturacion .f-cli input:focus-visible { outline:2px solid #b59f00; outline-offset:1px; }
+#section-facturacion .f-cli-lista { position:absolute; top:calc(100% + 6px); left:0; z-index:31; background:var(--card); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.15); min-width:300px; max-width:calc(100vw - 40px); max-height:320px; overflow-y:auto; }
+#section-facturacion .f-cli-lista button { display:block; width:100%; text-align:left; font:inherit; font-size:13px; background:none; border:0; border-bottom:1px solid #f1f2f5; padding:8px 12px; cursor:pointer; color:var(--text); }
+#section-facturacion .f-cli-lista button:hover, #section-facturacion .f-cli-lista button:focus-visible { background:#fffbe0; }
+#section-facturacion .f-cli-lista small { display:block; color:var(--muted); font-size:11px; }
+#section-facturacion .f-cli-vacio { padding:10px 12px; font-size:12.5px; color:var(--muted); }
+#section-facturacion .f-cli-chip { display:inline-flex; align-items:center; gap:6px; background:var(--yellow); color:var(--ink); border-radius:8px; padding:6px 6px 6px 12px; font-size:13px; max-width:340px; }
+#section-facturacion .f-cli-chip b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#section-facturacion .f-cli-chip button { font:inherit; font-size:12px; font-weight:800; background:var(--ink); color:#fff; border:0; border-radius:6px; width:24px; height:24px; cursor:pointer; flex-shrink:0; }
+#section-facturacion tr.f-art { cursor:pointer; }
+#section-facturacion tr.f-art:hover td { background:#fafaf2; }
+#section-facturacion tr.f-art:focus-visible { outline:2px solid #b59f00; outline-offset:-2px; }
+#section-facturacion .f-caret { display:inline-block; font-size:9px; color:var(--muted); margin-right:6px; transition:transform .15s; }
+#section-facturacion tr.f-art.abierta .f-caret { transform:rotate(90deg); }
+#section-facturacion tr.f-art-det > td { background:#fbfbf6; padding:6px 10px 12px 26px; border-left:3px solid var(--yellow); }
+#section-facturacion tr.f-art-det table { border:0; font-size:12px; }
+#section-facturacion .f-scroll { overflow-x:auto; }
 #section-facturacion .filter-btn { background:#fafbfd; border:1px solid var(--border); border-radius:8px; padding:8px 12px;
     font-size:12.5px; font-weight:600; cursor:pointer; color:var(--text); display:flex; align-items:center; gap:6px; }
 #section-facturacion .filter-btn .count { background:var(--yellow); color:var(--ink); border-radius:20px; font-size:10.5px;
@@ -2478,6 +2498,12 @@ let DATA = [];      // lineas de factura/NC crudas
 let META = {};
 let sel = { empresa:new Set(), vendedor:new Set(), mes:new Set(), categoria:new Set() };
 let activeTab = 'mes';
+// Filtro por cliente (a nivel EMPRESA: las compras de sus subcontactos se suman, igual que en Clientes)
+let selCliente = null, pendienteCliente = null, abiertoArt = null;
+let EMPRESA_DE = {}, NOMBRE_EMPRESA = {}, CLIENTES_LISTA = [];
+const escF = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const normF = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+function empresaDe(r) { return EMPRESA_DE[r.cliente_id] || r.cliente_id || ('n:' + r.cliente); }
 let chartCurva = null, chartVendedor = null;
 
 function fM(n) {
@@ -2513,18 +2539,36 @@ const ORIGEN_CLASE = { 'Importado':'imp', 'Reventa':'rev', 'Sin clasificar':'sin
 
 async function load() {
   try {
-    const [fR, mR] = await Promise.all([
+    const [fR, mR, cR] = await Promise.all([
       fetch('/data/facturacion.json', {cache:'no-store'}),
       fetch('/data/meta.json', {cache:'no-store'}),
+      fetch('/data/clientes.json', {cache:'no-store'}).catch(() => null),
     ]);
     if (!fR.ok) throw new Error('sin datos');
     DATA = await fR.json();
     DATA.forEach(r => { r.mes = (r.fecha||'').substring(0,7); });
+    try {
+      const cl = cR && cR.ok ? await cR.json() : [];
+      (Array.isArray(cl) ? cl : []).forEach(c => {
+        NOMBRE_EMPRESA[c.cliente_id] = c.cliente;
+        EMPRESA_DE[c.cliente_id] = c.cliente_id;
+        (c.subcontactos || []).forEach(sc => { EMPRESA_DE[sc.id] = c.cliente_id; });
+      });
+    } catch (e) {}
+    const vistos = {};
+    DATA.forEach(r => {
+      const id = empresaDe(r);
+      if (!vistos[id]) vistos[id] = { id, nombre: NOMBRE_EMPRESA[id] || r.cliente || 'Sin cliente', neta: 0 };
+      vistos[id].neta += r.monto_neto || 0;
+    });
+    CLIENTES_LISTA = Object.values(vistos).map(c => ({ ...c, _q: normF(c.nombre) }));
     META = mR.ok ? await mR.json() : {};
     initFilters();
-    renderAll();
+    if (pendienteCliente) { const p = pendienteCliente; pendienteCliente = null; verCliente(p.id, p.nombre); }
+    else renderAll();
   } catch (err) {
-    document.getElementById('f-loading').innerHTML =
+    const fl = document.getElementById('f-loading'); if (!fl) return;
+    fl.innerHTML =
       '⚠️ No se pudo conectar con los datos automáticos.<br>Revisá tu conexión a internet. Si sigue igual, fijate en GitHub (pestaña Actions) que la última actualización haya terminado bien.';
   }
 }
@@ -2540,6 +2584,7 @@ function initFilters() {
   const main = document.getElementById('f-main');
   main.innerHTML = `
     <div class="filters" id="f-filters-bar">
+      <div class="f-cli" id="f-cli"></div>
       ${filterGroupHtml('empresa', 'Empresa', empresas)}
       ${filterGroupHtml('vendedor', 'Vendedor', vendedores)}
       ${filterGroupHtml('mes', 'Mes', meses, labelMes)}
@@ -2561,13 +2606,54 @@ function initFilters() {
     </div>
     <div id="f-table-area"></div>
   `;
+  pintarFiltroCliente();
   setTab('mes');
 
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.filter-group')) {
       document.querySelectorAll('.filter-panel').forEach(p => p.classList.remove('open'));
     }
+    if (!e.target.closest('#f-cli')) { const s = document.getElementById('f-cli-sug'); if (s) s.innerHTML = ''; }
   });
+}
+
+function pintarFiltroCliente() {
+  const box = document.getElementById('f-cli'); if (!box) return;
+  if (selCliente) {
+    box.innerHTML = `<span class="f-cli-chip" title="${escF(selCliente.nombre)}">👤 <b>${escF(selCliente.nombre)}</b><button type="button" id="f-cli-x" aria-label="Quitar filtro de cliente">✕</button></span>`;
+    document.getElementById('f-cli-x').addEventListener('click', () => { selCliente = null; abiertoArt = null; pintarFiltroCliente(); renderAll(); });
+    return;
+  }
+  box.innerHTML = `<input type="search" id="f-cli-buscar" placeholder="👤 Buscar cliente…" aria-label="Filtrar por cliente" autocomplete="off"><div id="f-cli-sug"></div>`;
+  const inp = document.getElementById('f-cli-buscar');
+  inp.addEventListener('input', () => {
+    const q = normF(inp.value).trim(), sug = document.getElementById('f-cli-sug');
+    if (q.length < 2) { sug.innerHTML = ''; return; }
+    const r = CLIENTES_LISTA.filter(c => c._q.includes(q)).sort((a, b) => b.neta - a.neta).slice(0, 10);
+    sug.innerHTML = r.length ? `<div class="f-cli-lista">${r.map(c => `<button type="button" data-id="${escF(c.id)}">${escF(c.nombre)}<small>${fM(c.neta)} facturado en el período</small></button>`).join('')}</div>`
+      : '<div class="f-cli-lista"><div class="f-cli-vacio">Sin facturación para ese cliente en el período cargado.</div></div>';
+    sug.querySelectorAll('[data-id]').forEach(b => b.addEventListener('click', () => {
+      const c = r.find(x => String(x.id) === b.dataset.id);
+      selCliente = { id: c.id, nombre: c.nombre }; abiertoArt = null;
+      pintarFiltroCliente();
+      setTab('articulo');
+      renderAll();
+    }));
+  });
+}
+
+// Desde la ficha de Clientes: abre Facturación filtrada por ese cliente, en "Por artículo"
+function verCliente(id, nombre) {
+  if (typeof goToSection === 'function') goToSection('facturacion');
+  const t = document.getElementById('mbar-titulo'); if (t) t.textContent = 'Facturación';
+  window.scrollTo(0, 0);
+  if (!DATA.length || !document.getElementById('f-cli')) { pendienteCliente = { id, nombre }; return; }
+  const c = CLIENTES_LISTA.find(x => String(x.id) === String(id));
+  selCliente = { id: c ? c.id : id, nombre: c ? c.nombre : (nombre || 'Cliente') };
+  abiertoArt = null;
+  pintarFiltroCliente();
+  setTab('articulo');
+  renderAll();
 }
 
 function filterGroupHtml(key, label, options, labelFn) {
@@ -2607,6 +2693,7 @@ function clearFilter(key) {
 }
 function clearAllFilters() {
   Object.keys(sel).forEach(k => sel[k].clear());
+  selCliente = null; abiertoArt = null; pintarFiltroCliente();
   document.querySelectorAll('.filter-panel input[type=checkbox]').forEach(cb => cb.checked = false);
   updateFilterCounts(); renderAll();
 }
@@ -2623,7 +2710,8 @@ function filteredRows() {
     (sel.empresa.size===0 || sel.empresa.has(r.empresa)) &&
     (sel.vendedor.size===0 || sel.vendedor.has(r.vendedor)) &&
     (sel.mes.size===0 || sel.mes.has(r.mes)) &&
-    (sel.categoria.size===0 || sel.categoria.has(r.categoria))
+    (sel.categoria.size===0 || sel.categoria.has(r.categoria)) &&
+    (!selCliente || String(empresaDe(r)) === String(selCliente.id))
   );
 }
 
@@ -2730,15 +2818,41 @@ function renderTable(rows) {
   } else if (activeTab === 'articulo') {
     const g = {};
     rows.forEach(r => {
-      if (!g[r.producto]) g[r.producto] = { neta:0, cantidad:0, categoria:r.categoria };
-      g[r.producto].neta += r.monto_neto; g[r.producto].cantidad += r.cantidad;
+      if (!g[r.producto]) g[r.producto] = { neta:0, cantidad:0, categoria:r.categoria, ultima:'', comp:new Set(), lineas:[] };
+      const d = g[r.producto];
+      d.neta += r.monto_neto; d.cantidad += r.cantidad;
+      if (r.tipo === 'Factura') { d.comp.add(r.factura); if ((r.fecha||'') > d.ultima) d.ultima = r.fecha || ''; }
+      if (selCliente) d.lineas.push(r);
     });
-    const s = Object.entries(g).sort((a,b)=>b[1].neta-a[1].neta).slice(0,200);
-    html = '<table><thead><tr><th>Producto</th><th>Categoría</th><th class="num">Cantidad neta</th><th class="num">Facturación neta</th></tr></thead><tbody>';
-    s.forEach(([p,d]) => {
-      html += `<tr><td class="bold">${p}</td><td>${d.categoria}</td><td class="num">${fN(d.cantidad)}</td><td class="num bold">${fM(d.neta)}</td></tr>`;
+    const todos = Object.entries(g).sort((a,b)=>b[1].neta-a[1].neta);
+    const s = selCliente ? todos : todos.slice(0,200);
+    const fFecha = (f) => f ? f.split('-').reverse().join('/') : '—';
+    const fPU = (d) => d.cantidad > 0 ? '$ ' + Math.round(d.neta / d.cantidad).toLocaleString('es-AR') : '—';
+    if (selCliente) {
+      const tot = rows.reduce((a, r) => a + r.monto_neto, 0);
+      const fechas = rows.filter(r => r.tipo === 'Factura').map(r => r.fecha).filter(Boolean).sort();
+      html = `<div class="f-note">👤 <b>${escF(selCliente.nombre)}</b> · ${fN(s.length)} artículos · ${fM(tot)} de facturación neta · ${fN(new Set(rows.filter(r=>r.tipo==='Factura').map(r=>r.factura)).size)} facturas${fechas.length ? ` · última compra ${fFecha(fechas[fechas.length-1])}` : ''}. Tocá un artículo para ver cada factura.</div>`;
+    }
+    if (!s.length) { html += '<div class="empty-msg">No hay facturación con estos filtros.</div>'; area.innerHTML = html; return; }
+    html += '<div class="f-scroll"><table><thead><tr><th>Producto</th><th>Categoría</th><th class="num">Cantidad neta</th><th class="num">Facturación neta</th><th class="num">Precio prom.</th><th class="num">Última compra</th><th class="num">Facturas</th></tr></thead><tbody>';
+    s.forEach(([p,d], i) => {
+      const abierto = selCliente && abiertoArt === p;
+      html += `<tr${selCliente ? ` class="f-art${abierto ? ' abierta' : ''}" data-art="${i}" tabindex="0" title="Ver cada factura"` : ''}><td class="bold">${selCliente ? '<span class="f-caret">▶</span>' : ''}${escF(p)}</td><td>${escF(d.categoria)}</td><td class="num">${fN(d.cantidad)}</td><td class="num bold">${fM(d.neta)}</td><td class="num">${fPU(d)}</td><td class="num">${fFecha(d.ultima)}</td><td class="num">${fN(d.comp.size)}</td></tr>`;
+      if (abierto) {
+        html += `<tr class="f-art-det"><td colspan="7"><table><thead><tr><th>Fecha</th><th>Comprobante</th><th>Vendedor</th><th class="num">Cantidad</th><th class="num">Precio unit.</th><th class="num">Monto neto</th></tr></thead><tbody>${
+          d.lineas.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(r => `<tr><td>${fFecha(r.fecha)}</td><td>${escF(r.factura)}${r.tipo==='Nota de credito' ? '<span class="tag-nc">NC</span>' : ''}</td><td>${escF(r.vendedor)}</td><td class="num">${fN(r.cantidad)}</td><td class="num">${r.cantidad ? '$ ' + Math.round(r.monto_neto / r.cantidad).toLocaleString('es-AR') : '—'}</td><td class="num">$ ${Math.round(r.monto_neto).toLocaleString('es-AR')}</td></tr>`).join('')
+        }</tbody></table></td></tr>`;
+      }
     });
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
+    if (!selCliente && todos.length > 200) html += `<div class="f-note">Se muestran los 200 artículos más facturados de ${fN(todos.length)}.</div>`;
+    area.innerHTML = html;
+    if (selCliente) area.querySelectorAll('tr.f-art').forEach(tr => {
+      const abrir = () => { const p = s[+tr.dataset.art][0]; abiertoArt = abiertoArt === p ? null : p; renderTable(filteredRows()); };
+      tr.addEventListener('click', abrir);
+      tr.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); } });
+    });
+    return;
 
   } else if (activeTab === 'empresa') {
     const g = {};
@@ -2827,7 +2941,7 @@ function renderTable(rows) {
 }
 
 window.F = {
-  clearFilter, clearAllFilters, selectAllFilter, togglePanel, toggleFilter, setTab,
+  clearFilter, clearAllFilters, selectAllFilter, togglePanel, toggleFilter, setTab, verCliente,
   init: load,
 };
 })();
@@ -3789,7 +3903,10 @@ function fichaCliente(c) {
           <td>${tel(nro)}${wa(sc.celular)}</td><td>${mail(sc.email)}</td><td>${escCl(d)}</td></tr>`;
       }).join('')}
       </tbody></table></div></div>` : '';
-  return `${aviso}<div class="cl-ficha">
+  const navF = document.querySelector('.nav-item[data-section="facturacion"]');
+  const verCompra = navF && navF.style.display !== 'none' && window.F && F.verCliente
+    ? `<div class="cl-vercompra"><button type="button" class="pg-save-btn" onclick="event.stopPropagation(); F.verCliente(${Number(c.cliente_id)}, this.dataset.n)" data-n="${escCl(c.cliente)}">🧾 Ver qué compra (detalle por artículo)</button></div>` : '';
+  return `${aviso}${verCompra}<div class="cl-ficha">
     <div class="cl-ficha-col">
       <div class="cl-ficha-tit">Datos fiscales</div>
       ${dato('Código', escCl(c.codigo))}${dato('CUIT', escCl(c.cuit))}${dato('Condición IVA', escCl(c.condicion_iva))}
