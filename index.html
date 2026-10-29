@@ -7220,7 +7220,17 @@ const Asistente = (function () {
 #section-cotizador .ct-ac .big { font-size: 20px; font-weight: 800; }
 #section-cotizador .ct-bar { width: 140px; height: 8px; background: #ececec; border-radius: 5px; overflow: hidden; display: inline-block; vertical-align: middle; margin-left: 6px; }
 #section-cotizador .ct-bar i { display: block; height: 100%; background: #15803d; }
-#section-cotizador .ct-q { font-size: 11px; font-weight: 700; border-radius: 5px; padding: 2px 7px; background: #f1f1ec; color: #6b7280; margin-right: 4px; }
+#section-cotizador .ct-q { display: inline-flex; flex-direction: column; align-items: center; min-width: 74px; font-size: 11px; font-weight: 700; border-radius: 7px; padding: 4px 8px; background: #f1f1ec; color: #6b7280; border: 1px solid transparent; line-height: 1.3; }
+#section-cotizador .ct-q b { font-size: 12px; } #section-cotizador .ct-q small { font-size: 11px; font-weight: 600; }
+#section-cotizador .ct-qs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+#section-cotizador .ct-q.si { border-color: #9fd8b0; } #section-cotizador .ct-q.no { border-color: #f3b4ad; } #section-cotizador .ct-q.cur { border-color: #eadb7a; }
+#section-cotizador .ct-et { font-size: 11px; color: #6b7280; display: block; }
+#section-cotizador .ct-cumple { color: #15803d; } #section-cotizador .ct-resta { color: #b42318; font-weight: 700; }
+#section-cotizador .ct-dficha { margin-top: 12px; display: flex; flex-direction: column; gap: 2px; }
+#section-cotizador .ct-dficha .big { font-size: 26px; font-weight: 800; }
+#section-cotizador .ct-dsel { font: inherit; font-size: 12.5px; padding: 4px 6px; border: 1px solid #d6d6d0; border-radius: 6px; background: #fff; min-width: 190px; max-width: 100%; }
+#section-cotizador .ct-dtodos { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; font-size: 12.5px; color: #4b5563; margin-bottom: 8px; }
+#section-cotizador .ct-dtodos small { color: #6b7280; }
 #section-cotizador .ct-q.si { background: #e3f6e9; color: #15803d; } #section-cotizador .ct-q.no { background: #fde8e6; color: #b42318; } #section-cotizador .ct-q.cur { background: #fff8c2; color: #6b5b00; }
 #section-cotizador .ct-seg { display: inline-flex; border: 1px solid #d5d9e2; border-radius: 8px; overflow: hidden; }
 #section-cotizador .ct-seg button { font: inherit; font-size: 13px; font-weight: 700; background: #fff; color: #6b7280; border: 0; border-right: 1px solid #d5d9e2; padding: 8px 14px; cursor: pointer; }
@@ -7306,8 +7316,33 @@ const Asistente = (function () {
       : '$ ' + n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   const acuerdo = () => C.cliente ? ACUERDO_DE[C.cliente.cliente_id] || null : null;
-  const descuento = () => { const a = acuerdo(); return a ? Number(a.descuento_nivel) || 0 : 0; };
-  const neto = (it) => it.precio * (1 - descuento() / 100);
+  // Descuento de la ficha: el % que figura en el nombre de la lista de precios de Odoo (ej. "L4 32% (USD)" -> 32).
+  const descFicha = () => {
+    const m = C.cliente && String(C.cliente.lista_precios || '').match(/(\d+(?:[.,]\d+)?)\s*%/);
+    return m ? Number(m[1].replace(',', '.')) || 0 : 0;
+  };
+  // Cada renglón usa el de la ficha, salvo que el vendedor elija otro de la tabla de acuerdos.
+  const descDe = (it) => it.desc != null ? Number(it.desc) || 0 : descFicha();
+  const descuento = descFicha;
+  // Tabla de descuentos: el de la lista (ficha) y los adicionales en cascada.
+  // Con 32%: 32 · 32+5 = 35,40 · 32+10 = 38,80 · 32+10+5 = 41,86 · 32+10+10 = 44,92
+  const CASCADAS = [[], [5], [10], [10, 5], [10, 10]];
+  const cascada = (base, extra) => Math.round((1 - [base, ...extra].reduce((r, x) => r * (1 - x / 100), 1)) * 10000) / 100;
+  function opcionesDesc() {
+    const b = descFicha();
+    return CASCADAS.map(e => [cascada(b, e), [b, ...e].map(x => fN(x) + '%').join(' + ')]);
+  }
+  function selDesc(valor, attrs) {
+    const ops = opcionesDesc();
+    const hay = ops.some(([v]) => Math.abs(v - valor) < 0.005);
+    return `<select class="ct-dsel" ${attrs}>${hay ? '' : `<option value="-1" selected>${valor < 0 ? 'Elegir…' : fN(valor) + '%'}</option>`}${ops.map(([v, t], i) =>
+      `<option value="${v}" ${Math.abs(v - valor) < 0.005 ? 'selected' : ''}>${i ? t + ' = ' + fN(v) + '%' : t + (i ? '' : ' (ficha)')}</option>`).join('')}</select>`;
+  }
+  const neto = (it) => it.precio * (1 - descDe(it) / 100);
+  function etiquetaDesc() {
+    const u = [...new Set(C.items.map(descDe))];
+    return u.length === 1 ? `Descuento (${fN(u[0])}%)` : 'Descuentos';
+  }
   function totales() {
     const lista = C.items.reduce((s, it) => s + it.precio * (it.cant || 0), 0);
     const total = C.items.reduce((s, it) => s + neto(it) * (it.cant || 0), 0);
@@ -7467,7 +7502,7 @@ const Asistente = (function () {
         sug.querySelectorAll('[data-id]').forEach(b => b.addEventListener('click', () => {
           C.cliente = CLIENTES.find(c => String(c.cliente_id) === b.dataset.id) || null;
           if (C.cliente) { const { _q, subcontactos, otros_datos, ...resto } = C.cliente; C.cliente = resto; }
-          C.clienteLibre = ''; cambio(); pintarCliente(); pintarItems();
+          C.clienteLibre = ''; C.items.forEach(it => { it.desc = null; }); cambio(); pintarCliente(); pintarItems();
         }));
       });
       $('ct-cli-libre').addEventListener('input', e => { C.clienteLibre = e.target.value; cambio(); });
@@ -7479,19 +7514,27 @@ const Asistente = (function () {
     if (a) {
       const tq = (a.trimestres || []).find(t => t.en_curso);
       const chips = (a.trimestres || []).map(t => {
-        const cls = t.estado === 'Futuro' ? '' : t.estado === 'Cumple' ? 'si' : t.en_curso ? 'cur' : 'no';
-        return `<span class="ct-q ${cls}">T${t.trimestre} ${t.estado === 'Futuro' ? '—' : (t.pct == null ? '' : Math.round(t.pct) + '%')}</span>`;
+        const fut = t.estado === 'Futuro', ok = t.estado === 'Cumple';
+        const cls = fut ? '' : ok ? 'si' : t.en_curso ? 'cur' : 'no';
+        const txt = fut ? 'Futuro' : ok ? '✓ Cumplió' : t.en_curso ? 'En curso' : '✗ No cumplió';
+        return `<span class="ct-q ${cls}"><b>T${t.trimestre}</b>${txt}<small>${fut || t.pct == null ? '&nbsp;' : Math.round(t.pct) + '%'}</small></span>`;
       }).join('');
+      const uf = a.ultima_factura || {};
+      const pct = tq && tq.pct != null ? Math.max(0, tq.pct) : null;
       acHtml = `<div class="ct-ac">
-        <div><span style="font-size:11px;color:#6b7280;display:block">Acuerdo</span><b>${esc(a.nivel)}</b></div>
-        <div><span style="font-size:11px;color:#6b7280;display:block">Descuento que se aplica</span><span class="big">${fN(a.descuento_nivel)}%</span></div>
-        ${tq ? `<div><span style="font-size:11px;color:#6b7280;display:block">Trimestre en curso (T${tq.trimestre})</span>
-          <b>${tq.pct == null ? '—' : Math.round(tq.pct) + '%'}</b><span class="ct-bar"><i style="width:${Math.min(100, Math.max(0, tq.pct || 0))}%"></i></span>
-          ${tq.falta ? `<span style="font-size:12px;color:#6b7280;display:block">Le faltan ${pesos(tq.falta)} para la meta de ${pesos(tq.meta)}</span>` : ''}</div>` : ''}
-        <div><span style="font-size:11px;color:#6b7280;display:block">Trimestres</span>${chips}</div>
-        ${a.ultima_factura && a.ultima_factura.descuento != null ? `<div style="font-size:12px;color:#6b7280">Última factura: ${fN(a.ultima_factura.descuento)}% de descuento</div>` : ''}
+        <div><span class="ct-et">Acuerdo</span><b>${esc(a.nivel)}</b></div>
+        ${uf.descuento != null ? `<div><span class="ct-et">Desc. última compra</span><b>${fN(uf.descuento)}%</b>${uf.fecha ? `<span class="ct-et">${uf.fecha.split('-').reverse().join('/')}</span>` : ''}</div>` : ''}
+        ${tq ? `<div><span class="ct-et">Acuerdo T${tq.trimestre} (en curso)</span>
+          <b class="ct-cumple">${pct == null ? '—' : Math.round(pct) + '% cumplido'}</b>${pct != null && pct < 100 ? ` <b class="ct-resta">· resta ${Math.round(100 - pct)}%</b>` : ''}
+          <span class="ct-bar"><i style="width:${Math.min(100, pct || 0)}%"></i></span>
+          ${tq.falta ? `<span class="ct-et ct-resta">Faltan ${pesos(tq.falta)} para la meta de ${pesos(tq.meta)}</span>` : (pct != null ? '<span class="ct-et" style="color:#15803d">¡Meta cumplida!</span>' : '')}</div>` : ''}
+        <div><span class="ct-et">Trimestres</span><div class="ct-qs">${chips}</div></div>
       </div>`;
     }
+    const df = descFicha();
+    acHtml = `<div class="ct-dficha"><span class="ct-et">Descuento de la ficha (lista de precios de Odoo)</span>
+        <span class="big">${df ? fN(df) + '%' : 'Sin descuento'}</span>
+        ${df ? '' : '<span class="ct-et">La lista de precios no tiene un % en el nombre: se cotiza a precio de lista.</span>'}</div>` + acHtml.replace('Sin acuerdo comercial cargado: se cotiza a precio de lista.', 'Sin acuerdo comercial cargado.');
     box.innerHTML = `<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
         <div style="font-size:17px;font-weight:800">${esc(c.cliente)}</div>
         <button type="button" class="ct-link" id="ct-cli-cambiar">Cambiar cliente</button></div>
@@ -7531,15 +7574,16 @@ const Asistente = (function () {
   function pintarItems() {
     const box = $('ct-items'); if (!box) return;
     if (!C.items.length) { box.innerHTML = '<div class="ct-vacio">Todavía no agregaste productos. Buscalos arriba y tocá ＋.</div>'; estado(); return; }
-    const d = descuento();
-    box.innerHTML = `<div style="overflow-x:auto"><table class="ct-items"><thead><tr><th></th><th>Artículo</th><th class="num">Cant.</th><th class="num">P. lista</th><th class="num">Desc.</th><th class="num">P. unitario</th><th class="num">Subtotal</th><th></th></tr></thead><tbody>
+    const usados = [...new Set(C.items.map(descDe))];
+    box.innerHTML = `<div class="ct-dtodos">Descuento para todos los renglones: ${selDesc(usados.length === 1 ? usados[0] : -1, 'id="ct-dtodos"')}${usados.length === 1 ? '' : ' <small>(hay descuentos distintos)</small>'}</div>
+      <div style="overflow-x:auto"><table class="ct-items"><thead><tr><th></th><th>Artículo</th><th class="num">Cant.</th><th class="num">P. lista</th><th class="num">Desc.</th><th class="num">P. unitario</th><th class="num">Subtotal</th><th></th></tr></thead><tbody>
       ${C.items.map((it, i) => `<tr>
         <td class="c-foto">${fotoHtml(it)}</td>
         <td class="c-art"><span style="color:#6b7280;font-size:11.5px">${esc(it.codigo)}</span><br><b>${esc(it.nombre)}</b></td>
         <td class="num c-cant"><input type="number" class="ct-cant" min="1" step="1" inputmode="numeric" value="${it.cant}" data-i="${i}" aria-label="Cantidad de ${esc(it.nombre)}"></td>
         <td class="num c-plista">${fP(it.precio)}</td>
-        <td class="num c-desc">${d ? fN(d) + '%' : '—'}</td>
-        <td class="num c-pu">${d ? `<span class="ct-tachado">${fP(it.precio)}</span>` : ''}${fP(neto(it))}</td>
+        <td class="num c-desc">${selDesc(descDe(it), `data-d="${i}" aria-label="Descuento de ${esc(it.nombre)}"`)}</td>
+        <td class="num c-pu" data-pu="${i}">${descDe(it) ? `<span class="ct-tachado">${fP(it.precio)}</span>` : ''}${fP(neto(it))}</td>
         <td class="num c-sub" data-sub="${i}">${fP(neto(it) * it.cant)}</td>
         <td class="c-x"><button type="button" class="ct-quitar" data-q="${i}" aria-label="Quitar ${esc(it.nombre)}">✕</button></td></tr>`).join('')}
       </tbody></table></div>
@@ -7550,12 +7594,16 @@ const Asistente = (function () {
       pintarTotales(); cambio();
     }));
     box.querySelectorAll('[data-q]').forEach(b => b.addEventListener('click', () => { C.items.splice(+b.dataset.q, 1); cambio(); pintarItems(); buscarProductos(); }));
+    const fijar = (it, v) => { if (v < 0) return; it.desc = Math.abs(v - descFicha()) < 1e-9 ? null : v; };
+    box.querySelectorAll('[data-d]').forEach(sel => sel.addEventListener('change', () => { fijar(C.items[+sel.dataset.d], Number(sel.value)); cambio(); pintarItems(); }));
+    const todos = $('ct-dtodos');
+    if (todos) todos.addEventListener('change', () => { const v = Number(todos.value); if (v < 0) return; C.items.forEach(it => fijar(it, v)); cambio(); pintarItems(); });
     pintarTotales(); estado();
     pintarFotos(box, C.items);
   }
   function pintarTotales() {
-    const t = totales(), d = descuento(), tb = $('ct-tot'); if (!tb) return;
-    tb.innerHTML = (d ? `<tr><td>Subtotal a precio de lista</td><td>${fP(t.lista)}</td></tr><tr><td>Descuento acuerdo (${fN(d)}%)</td><td>− ${fP(t.desc)}</td></tr>` : '')
+    const t = totales(), tb = $('ct-tot'); if (!tb) return;
+    tb.innerHTML = (t.desc > 0.004 ? `<tr><td>Subtotal a precio de lista</td><td>${fP(t.lista)}</td></tr><tr><td>${etiquetaDesc()}</td><td>− ${fP(t.desc)}</td></tr>` : '')
       + `<tr class="fin"><td>Total ${C.empresa === 'spl' ? '(US$)' : ''}</td><td>${fP(t.total)}</td></tr><tr><td></td><td style="font-size:12px;color:#6b7280">+ IVA</td></tr>`;
   }
 
@@ -7570,7 +7618,7 @@ const Asistente = (function () {
       cliente: C.cliente ? C.cliente.cliente : (C.clienteLibre || ''),
       total: Math.round(t.total * 100) / 100,
       datos: { empresa: C.empresa, cliente: C.cliente, clienteLibre: C.clienteLibre, items: C.items, notas: C.notas, verAvance: C.verAvance,
-        acuerdo: a ? { nivel: a.nivel, descuento_nivel: a.descuento_nivel } : null },
+        acuerdo: a ? { nivel: a.nivel, descuento_nivel: a.descuento_nivel } : null, descuento_ficha: descFicha() },
     };
   }
   async function guardar(avisar) {
@@ -7693,7 +7741,7 @@ const Asistente = (function () {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const W = 210, H = 297, M = 12;
-    const c = C.cliente, a = acuerdo(), d = descuento(), t = totales();
+    const c = C.cliente, a = acuerdo(), t = totales(), d = t.desc > 0.004;
     const nro = C.id ? String(C.id).padStart(5, '0') : 'BORRADOR';
     const hoy = new Date().toLocaleDateString('es-AR');
     const p = window.PERFIL || {}, mail = (window.USUARIO && window.USUARIO.email) || '';
@@ -7730,7 +7778,7 @@ const Asistente = (function () {
     }
     if (mail && mail !== vendedor) { doc.text(mail, col2, yd); yd += 4; }
     if (a) {
-      doc.setFont('helvetica', 'bold'); negro(); doc.text(`Acuerdo comercial: ${String(a.nivel || '').includes(fN(a.descuento_nivel) + '%') ? a.nivel : `${a.nivel} · ${fN(a.descuento_nivel)}% de descuento`}`, col2, yd + 1.5); yd += 5.5;
+      doc.setFont('helvetica', 'bold'); negro(); doc.text(`Acuerdo comercial: ${a.nivel || ''}`, col2, yd + 1.5); yd += 5.5;
       const tq = (a.trimestres || []).find(q => q.en_curso);
       if (C.verAvance && tq && tq.pct != null) {
         doc.setFont('helvetica', 'normal'); gris();
@@ -7765,7 +7813,7 @@ const Asistente = (function () {
       doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); negro(); doc.text(doc.splitTextToSize(it.nombre, cols[1].w - 3).slice(0, 3), x + 1.5, y + 8.2);
       x += cols[1].w;
       const celda = (v, w, neg) => { doc.setFont('helvetica', neg ? 'bold' : 'normal'); doc.setFontSize(8.5); negro(); doc.text(v, x + w - 1.5, y + 8.2, { align: 'right' }); x += w; };
-      celda(fN(it.cant), cols[2].w); celda(fP(it.precio), cols[3].w); celda(d ? fN(d) + '%' : '—', cols[4].w); celda(fP(neto(it)), cols[5].w); celda(fP(neto(it) * it.cant), cols[6].w, true);
+      celda(fN(it.cant), cols[2].w); celda(fP(it.precio), cols[3].w); celda(descDe(it) ? fN(descDe(it)) + '%' : '—', cols[4].w); celda(fP(neto(it)), cols[5].w); celda(fP(neto(it) * it.cant), cols[6].w, true);
       y += ROW; doc.setDrawColor(235, 235, 235); doc.setLineWidth(0.2); doc.line(M, y - 2, W - M, y - 2);
     });
 
@@ -7777,7 +7825,7 @@ const Asistente = (function () {
     doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); negro();
     if (d) {
       doc.text('Subtotal a precio de lista', xl, y); doc.text(fP(t.lista), xr, y, { align: 'right' }); y += 6;
-      doc.text(`Descuento acuerdo (${fN(d)}%)`, xl, y); doc.text('- ' + fP(t.desc), xr, y, { align: 'right' }); y += 4;
+      doc.text(etiquetaDesc(), xl, y); doc.text('- ' + fP(t.desc), xr, y, { align: 'right' }); y += 4;
     }
     doc.setDrawColor(26, 29, 46); doc.setLineWidth(0.5); doc.line(xl, y, xr, y); y += 6.5;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.text(spl ? 'TOTAL US$' : 'TOTAL', xl, y); doc.text(fP(t.total), xr, y, { align: 'right' });
