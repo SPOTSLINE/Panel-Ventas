@@ -983,14 +983,13 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
     <div class="nav-item" data-section="facturacion"><span class="ic">🧾</span> Facturación</div>
     <div class="nav-item" data-section="pendiente"><span class="ic">⏳</span> Pendiente</div>
     <div class="nav-item" data-section="stock"><span class="ic">🗃️</span> Stock</div>
-    <div class="nav-item" data-section="cotizador"><span class="ic">🧾</span> Cotizador</div>
+    <div class="nav-item" data-section="cotizador"><span class="ic">📝</span> Cotizador</div>
     <div class="nav-item" data-section="unidades"><span class="ic">📦</span> Unidades</div>
     <div class="nav-item" data-section="margen"><span class="ic">💰</span> Costo y Margen</div>
     <div class="nav-item" data-section="clientes"><span class="ic">👥</span> Clientes</div>
     <div class="nav-item" data-section="acuerdos"><span class="ic"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span> Acuerdos</div>
     <div class="nav-item" data-section="ofertas"><span class="ic">🏷️</span> Ofertas</div>
     <div class="nav-item" data-section="comisiones"><span class="ic">💵</span> Comisiones</div>
-    <div class="nav-item" id="nav-cc"><span class="ic">🏦</span> Cuentas Corrientes <span class="ext">↗</span></div>
     <div class="nav-item" id="nav-config"><span class="ic"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Configuración</div>
     <div class="nav-item salir" id="nav-salir"><span class="ic">🚪</span> Cerrar sesión</div>
     <div class="vc-caja" id="vc-caja" hidden>
@@ -1310,7 +1309,7 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
     <!-- ═══════════════ COTIZADOR ═══════════════ -->
     <div id="section-cotizador" class="section">
       <div class="section-header">
-        <h1>🧾 Cotizador</h1>
+        <h1>📝 Cotizador</h1>
         <div class="section-sub">Elegí el cliente y los productos: se aplica el descuento de su acuerdo y sale un PDF con fotos para mandar por WhatsApp.</div>
       </div>
       <div class="main" id="ct-main"></div>
@@ -1390,8 +1389,7 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
 // ═══════════════════════════════════════════════════════
 // NAVEGACIÓN DEL SIDEBAR (sin recargar la página)
 // ═══════════════════════════════════════════════════════
-const CUENTAS_CORRIENTES_URL = "https://spotsline.github.io/Cobranzas/";
-document.getElementById('nav-cc').addEventListener('click', () => window.open(CUENTAS_CORRIENTES_URL, '_blank'));
+// Cuentas Corrientes (Cobranzas) se abre desde el Panel de Paneles; ya no tiene acceso desde acá.
 
 const initedSections = new Set();
 
@@ -4159,7 +4157,6 @@ window.U = { init: load };
     cerrar();
     window.scrollTo(0, 0);
   }));
-  document.getElementById('nav-cc').addEventListener('click', cerrar);
   document.getElementById('nav-salir').addEventListener('click', () => PanelLogin.salir());
   const fuente = document.getElementById('sidebar-updated');
   const copiar = () => { document.getElementById('mbar-act').textContent = fuente.textContent.replace('🔄 ', ''); };
@@ -5269,10 +5266,10 @@ const Configuracion = (function () {
   const SECCIONES = [
     ['panel', 'Panel General'], ['venta', 'Venta'], ['facturacion', 'Facturación'], ['pendiente', 'Pendiente'],
     ['stock', 'Stock'], ['cotizador', 'Cotizador'], ['unidades', 'Unidades'], ['margen', 'Costo y Margen'], ['clientes', 'Clientes'], ['acuerdos', 'Acuerdos'],
-    ['ofertas', 'Ofertas'], ['cc', 'Cuentas Corrientes'],
+    ['ofertas', 'Ofertas'],
   ];
   // Lo que ve un vendedor (siempre solo lo de su equipo y sin costos)
-  const SECCIONES_VENDEDOR = ['panel', 'venta', 'facturacion', 'pendiente', 'stock', 'cotizador', 'clientes', 'acuerdos', 'ofertas', 'cc'];
+  const SECCIONES_VENDEDOR = ['panel', 'venta', 'facturacion', 'pendiente', 'stock', 'cotizador', 'clientes', 'acuerdos', 'ofertas'];
   const NOMBRE_ROL = { admin: 'Administrador', lectura: 'Solo lectura', vendedor: 'Vendedor' };
   let EQUIPOS = null;
   async function cargarEquipos() {
@@ -5809,8 +5806,6 @@ const Configuracion = (function () {
       : !p.secciones ? null : new Set(p.secciones);
     const puede = (id) => !permitidas || permitidas.has(id);
     $$('.nav-item[data-section]').forEach(n => { n.style.display = puede(n.dataset.section) ? '' : 'none'; });
-    const cc = document.getElementById('nav-cc');
-    if (cc) cc.style.display = puede('cc') ? '' : 'none';
 
     if (!puede('panel')) {
       const primera = $$('.nav-item[data-section]').find(n => puede(n.dataset.section));
@@ -6357,7 +6352,7 @@ const Asistente = (function () {
   body.addEventListener('click', (e) => {
     const b = e.target.closest('[data-ir]');
     if (!b || b.disabled) return;
-    ({ inicio, precio: vistaPrecio, listas: vistaListas, factura: vistaFactura, cuenta: abrirCuenta, ofertas: irOfertas })[b.dataset.ir]();
+    ({ inicio, precio: vistaPrecio, listas: vistaListas, factura: vistaFactura, ofertas: irOfertas })[b.dataset.ir]();
   });
 
   // ─── Menú ───
@@ -6371,10 +6366,6 @@ const Asistente = (function () {
     const t = document.getElementById('mbar-titulo'); if (t) t.textContent = 'Ofertas';
     window.scrollTo(0, 0);
   }
-  function puedeCC() {
-    const n = document.getElementById('nav-cc');
-    return n && n.style.display !== 'none';
-  }
   function inicio() {
     const u = window.PERFIL || {};
     const nombre = String(u.nombre || '').trim().split(/\s+/)[0];
@@ -6385,7 +6376,6 @@ const Asistente = (function () {
         <button type="button" class="asis-op" data-ir="listas"><span class="ic">📄</span><span>Bajar la lista de precios<small>PDF actualizado desde Odoo</small></span></button>
         <button type="button" class="asis-op" data-ir="factura"><span class="ic">🧾</span><span>Buscar una factura<small>Por cliente o número, y bajar el PDF</small></span></button>
         ${puedeOfertas() ? '<button type="button" class="asis-op" data-ir="ofertas"><span class="ic">🏷️</span><span>Ver las ofertas<small>Vigentes, para compartir por WhatsApp</small></span></button>' : ''}
-        ${puedeCC() ? '<button type="button" class="asis-op" data-ir="cuenta"><span class="ic">🏦</span><span>Saldo y cuenta corriente<small>Abre Cuentas Corrientes</small></span></button>' : ''}
       </div>`;
   }
 
@@ -6577,10 +6567,6 @@ const Asistente = (function () {
     pintar();
   }
 
-  // ─── Cuenta corriente ───
-  function abrirCuenta() {
-    if (typeof CUENTAS_CORRIENTES_URL !== 'undefined') window.open(CUENTAS_CORRIENTES_URL, '_blank', 'noopener');
-  }
 
   return { abrir, cerrar };
 })();
