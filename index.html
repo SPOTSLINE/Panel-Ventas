@@ -5981,6 +5981,17 @@ const Configuracion = (function () {
 #section-ofertas .of-prev { max-width: 160px; max-height: 160px; border-radius: 8px; display: block; margin-top: 8px; }
 #section-ofertas .of-prev[hidden] { display: none; }
 #section-ofertas .of-msg { font-size: 13px; min-height: 18px; }
+#section-ofertas .of-card { position: relative; }
+#section-ofertas .of-card.sel { border-color: var(--yellow, #F6E921); box-shadow: 0 0 0 2px var(--yellow, #F6E921); }
+#section-ofertas .of-selchk { position: absolute; top: 10px; right: 10px; z-index: 2; cursor: pointer; }
+#section-ofertas .of-selchk input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+#section-ofertas .of-selchk span { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(0,0,0,.55); border: 2px solid #fff; color: #1D1D1F; font-weight: 900; font-size: 17px; }
+#section-ofertas .of-selchk input:checked + span { background: var(--yellow, #F6E921); border-color: var(--yellow, #F6E921); }
+#section-ofertas .of-selchk input:checked + span::after { content: '✓'; }
+#section-ofertas .of-selchk input:focus-visible + span { outline: 2px solid #fff; outline-offset: 2px; }
+#section-ofertas .of-selbar { position: sticky; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 5; margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: #1D1D1F; border: 1px solid var(--yellow, #F6E921); border-radius: 12px; padding: 10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+#section-ofertas .of-selbar[hidden] { display: none; }
+#section-ofertas .of-selbar b { flex: 1; min-width: 150px; }
 #section-ofertas .of-msg.err { color: #ff8a80; } #section-ofertas .of-msg.ok { color: #7ee2a0; }
 .of-zoom { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; padding: 20px; }
 .of-zoom[hidden] { display: none; }
@@ -6010,6 +6021,9 @@ window.OF = (function () {
   const esAdmin = () => document.documentElement.dataset.rol === 'admin';
 
   let OFERTAS = [], URLS = {}, verVencidas = false, filtro = '', iniciado = false, vistaHasta = 0, editando = null;
+  const SEL = new Set();   // ofertas seleccionadas para compartir juntas
+  let conTexto = true;
+  try { conTexto = localStorage.getItem('of_con_texto') !== '0'; } catch (e) {}
   const CLAVE_VISTO = () => 'of_visto_' + ((window.USUARIO || {}).id || '');
 
   // ─── "Nuevas": punto amarillo en el menú hasta que el usuario entra a la sección ───
@@ -6045,6 +6059,8 @@ window.OF = (function () {
     $('#of-main').innerHTML = `
       <div class="of-barra">
         <input type="search" id="of-buscar" placeholder="🔎 Buscar oferta..." aria-label="Buscar oferta">
+        <label class="of-check"><input type="checkbox" id="of-contexto" ${conTexto ? 'checked' : ''}> Compartir con el texto</label>
+        <button type="button" class="of-btn" id="of-todas">☑ Seleccionar todas</button>
         <label class="of-check solo-admin"><input type="checkbox" id="of-vencidas"> Ver vencidas</label>
         <button type="button" class="of-btn am solo-admin" id="of-nueva" style="margin-left:auto">＋ Nueva oferta</button>
       </div>
@@ -6062,9 +6078,31 @@ window.OF = (function () {
           <span class="of-msg" id="of-msg" role="status"></span>
         </div>
       </form>
-      <div id="of-lista"></div>`;
+      <div id="of-lista"></div>
+      <div class="of-selbar" id="of-selbar" hidden>
+        <b id="of-selcant"></b>
+        <button type="button" class="of-btn wa" id="of-sel-compartir">📲 Compartir</button>
+        <button type="button" class="of-btn" id="of-sel-bajar">⬇ Bajar</button>
+        <button type="button" class="of-btn" id="of-sel-limpiar" aria-label="Quitar selección">✕</button>
+      </div>`;
     $('#of-buscar').addEventListener('input', (e) => { filtro = sinTildes(e.target.value); pintar(); });
     $('#of-vencidas').addEventListener('change', (e) => { verVencidas = e.target.checked; pintar(); });
+    $('#of-contexto').addEventListener('change', (e) => { conTexto = e.target.checked; try { localStorage.setItem('of_con_texto', conTexto ? '1' : '0'); } catch (er) {} });
+    $('#of-todas').addEventListener('click', () => {
+      const vis = visibles();
+      const todas = vis.length && vis.every(o => SEL.has(o.id));
+      vis.forEach(o => todas ? SEL.delete(o.id) : SEL.add(o.id));
+      pintar();
+    });
+    $('#of-lista').addEventListener('change', (e) => {
+      const c = e.target.closest('[data-sel]'); if (!c) return;
+      c.checked ? SEL.add(c.dataset.sel) : SEL.delete(c.dataset.sel);
+      c.closest('.of-card').classList.toggle('sel', c.checked);
+      barraSel();
+    });
+    $('#of-sel-limpiar').addEventListener('click', () => { SEL.clear(); pintar(); });
+    $('#of-sel-compartir').addEventListener('click', (e) => compartir(seleccionadas(), e.currentTarget));
+    $('#of-sel-bajar').addEventListener('click', (e) => bajarVarias(seleccionadas(), e.currentTarget));
     $('#of-nueva').addEventListener('click', () => {
       const abierto = !$('#of-form').hidden && !editando;
       limpiarForm();
@@ -6079,13 +6117,28 @@ window.OF = (function () {
     $('#of-lista').addEventListener('click', accion);
   }
 
-  function pintar() {
+  function visibles() {
     const t = hoy();
-    const lista = OFERTAS.filter(o => {
+    return OFERTAS.filter(o => {
       const vencida = o.vence && aFecha(o.vence) < t;
       if (vencida && !(verVencidas && esAdmin())) return false;
       return !filtro || sinTildes(o.titulo + ' ' + (o.detalle || '')).includes(filtro);
     });
+  }
+  const seleccionadas = () => OFERTAS.filter(o => SEL.has(o.id));
+  function barraSel() {
+    [...SEL].forEach(id => { if (!OFERTAS.some(o => o.id === id)) SEL.delete(id); });
+    const n = SEL.size, bar = $('#of-selbar');
+    bar.hidden = !n;
+    $('#of-selcant').textContent = n === 1 ? '1 oferta seleccionada' : `${n} ofertas seleccionadas`;
+    const vis = visibles();
+    $('#of-todas').textContent = vis.length && vis.every(o => SEL.has(o.id)) ? '☐ Quitar todas' : '☑ Seleccionar todas';
+  }
+
+  function pintar() {
+    const t = hoy();
+    const lista = visibles();
+    barraSel();
     if (!lista.length) {
       $('#of-lista').innerHTML = `<div class="of-vacio">${OFERTAS.length && filtro ? 'No hay ofertas que coincidan con la búsqueda.' : 'No hay ofertas vigentes por ahora.'}</div>`;
       return;
@@ -6098,7 +6151,8 @@ window.OF = (function () {
         : vencida ? `Venció el ${fecha(o.vence)}`
         : dias === 0 ? 'Vence HOY' : dias === 1 ? 'Vence mañana' : `Válida hasta el ${fecha(o.vence)}`;
       return `
-        <article class="of-card${vencida ? ' vencida' : ''}">
+        <article class="of-card${vencida ? ' vencida' : ''}${SEL.has(o.id) ? ' sel' : ''}">
+          <label class="of-selchk" title="Seleccionar para compartir"><input type="checkbox" data-sel="${esc(o.id)}" ${SEL.has(o.id) ? 'checked' : ''} aria-label="Seleccionar ${esc(o.titulo)}"><span></span></label>
           <button type="button" class="of-img" data-zoom="${esc(o.id)}" aria-label="Ver imagen de ${esc(o.titulo)}">
             <img src="${esc(URLS[o.imagen] || '')}" alt="" loading="lazy">
             ${nueva && !vencida ? '<span class="of-nueva">NUEVA</span>' : ''}
@@ -6150,23 +6204,7 @@ window.OF = (function () {
       b.disabled = false; b.textContent = txt;
       return;
     }
-    if (b.dataset.compartir) {
-      const texto = `*${o.titulo}*` + (o.detalle ? `\n${o.detalle}` : '') + (o.vence ? `\nVálida hasta el ${fecha(o.vence)}` : '');
-      const txt = b.textContent; b.disabled = true; b.textContent = 'Preparando…';
-      try {
-        const blob = await bajarBlob(o);
-        const archivo = new File([blob], nombreArchivo(o), { type: blob.type || 'image/jpeg' });
-        if (navigator.canShare && navigator.canShare({ files: [archivo] })) {
-          await navigator.share({ files: [archivo], text: texto, title: o.titulo });   // celular: WhatsApp con la imagen
-        } else {
-          window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank', 'noopener');   // compu: solo el texto
-        }
-      } catch (err) {
-        if (err && err.name !== 'AbortError') { console.error('[Ofertas]', err); alerta(b, 'No se pudo compartir'); }
-      }
-      b.disabled = false; b.textContent = txt;
-      return;
-    }
+    if (b.dataset.compartir) { await compartir([o], b); return; }
     if (b.dataset.editar && esAdmin()) { abrirForm(o); return; }
     if (b.dataset.borrar && esAdmin()) {
       if (b.dataset.confirmar !== '1') {
@@ -6181,6 +6219,49 @@ window.OF = (function () {
       OFERTAS = OFERTAS.filter(x => x.id !== o.id);
       pintar();
     }
+  }
+
+  const textoDe = (o) => `*${o.titulo}*` + (o.detalle ? `\n${o.detalle}` : '') + (o.vence ? `\nVálida hasta el ${fecha(o.vence)}` : '');
+
+  // Comparte una o varias ofertas. En el celular manda las imágenes juntas (con o sin el texto);
+  // en la compu, que no puede compartir archivos, baja las imágenes y abre WhatsApp con el texto.
+  async function compartir(lista, b) {
+    if (!lista.length) return;
+    const texto = conTexto ? lista.map(textoDe).join('\n\n') : '';
+    const txt = b.textContent; b.disabled = true; b.textContent = 'Preparando…';
+    try {
+      const archivos = await Promise.all(lista.map(async (o, i) => {
+        const blob = await bajarBlob(o);
+        const nom = lista.length > 1 ? `${i + 1} - ${nombreArchivo(o)}` : nombreArchivo(o);
+        return new File([blob], nom, { type: blob.type || 'image/jpeg' });
+      }));
+      if (navigator.canShare && navigator.canShare({ files: archivos })) {
+        const datos = { files: archivos };
+        if (texto) datos.text = texto;
+        if (lista.length === 1) datos.title = lista[0].titulo;
+        await navigator.share(datos);
+      } else {
+        archivos.forEach(f => { const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); });
+        if (texto) window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank', 'noopener');
+      }
+    } catch (err) {
+      if (err && err.name !== 'AbortError') { console.error('[Ofertas]', err); alerta(b, 'No se pudo compartir'); }
+    }
+    b.disabled = false; if (b.textContent === 'Preparando…') b.textContent = txt;
+  }
+
+  async function bajarVarias(lista, b) {
+    const txt = b.textContent; b.disabled = true; b.textContent = 'Bajando…';
+    try {
+      for (const [i, o] of lista.entries()) {
+        const blob = await bajarBlob(o);
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = lista.length > 1 ? `${i + 1} - ${nombreArchivo(o)}` : nombreArchivo(o);
+        document.body.appendChild(a); a.click(); a.remove();
+        await new Promise(r => setTimeout(r, 250));
+      }
+    } catch (err) { console.error('[Ofertas]', err); alerta(b, 'No se pudo bajar'); }
+    b.disabled = false; if (b.textContent === 'Bajando…') b.textContent = txt;
   }
 
   function alerta(b, texto) {
