@@ -2953,6 +2953,8 @@ let sortEquipo = { col: 'monto', dir: 'desc' };
 let nivel1 = 'vendedor';            // 'vendedor' (el de la orden) o 'equipo'
 let drillQ = '';                    // texto de busqueda del drill-down
 let empresaActual = '';
+let filtroTramo = null;             // índice del tramo de antigüedad elegido (filtra todo el pendiente)
+let editandoTramos = false;
 const abiertos1 = new Set();        // vendedores/equipos desplegados
 const abiertos2 = new Set();        // clientes desplegados (clave: nivel1 + SEP + cliente)
 const SEP = '\u0001';
@@ -2992,6 +2994,75 @@ function fM(n) {
 }
 function fN(n) { return new Intl.NumberFormat('es-AR').format(n||0); }
 
+/* Objetivo de antigüedad del pendiente (días). Se guarda en Supabase, tabla panel_parametros
+   (clave 'pendiente_objetivo_dias'); lo cambia solo un administrador. Por defecto 15. */
+let OBJETIVO_DIAS = null;
+function objetivoDias() { return OBJETIVO_DIAS == null ? 15 : OBJETIVO_DIAS; }
+/* Tramos de antigüedad por renglón: 3 cortes en días (claves pendiente_tramo_1..3). Por defecto 20 / 30 / 45:
+   menos de 20 · 20 a 29 · 30 a 44 · 45 o más. */
+const TRAMOS_DEF = [20, 30, 45];
+let TRAMOS = null;
+function cortesTramos() { return TRAMOS || TRAMOS_DEF; }
+async function cargarObjetivoDias() {
+  try {
+    const { data, error } = await window.SB.from('panel_parametros').select('clave,valor')
+      .in('clave', ['pendiente_objetivo_dias', 'pendiente_tramo_1', 'pendiente_tramo_2', 'pendiente_tramo_3']);
+    if (error || !data) return;
+    const v = {}; data.forEach(r => { if (r.valor != null && !isNaN(+r.valor)) v[r.clave] = +r.valor; });
+    if (v.pendiente_objetivo_dias != null) OBJETIVO_DIAS = v.pendiente_objetivo_dias;
+    const t = [v.pendiente_tramo_1, v.pendiente_tramo_2, v.pendiente_tramo_3];
+    if (t.every(x => x != null) && t[0] > 0 && t[0] < t[1] && t[1] < t[2]) TRAMOS = t;
+  } catch (e) {}
+}
+async function guardarTramos(t) {
+  const { data: { user } } = await window.SB.auth.getUser();
+  const ahora = new Date().toISOString(), quien = user ? user.email : null;
+  const { error } = await window.SB.from('panel_parametros').upsert(t.map((x, i) => ({
+    clave: 'pendiente_tramo_' + (i + 1), valor: x, actualizado: ahora, actualizado_por: quien })));
+  if (error) throw error;
+  TRAMOS = t;
+}
+function tramoDe(d) {
+  if (d === null || d === undefined) return 4;          // sin fecha
+  const c = cortesTramos();
+  return d < c[0] ? 0 : d < c[1] ? 1 : d < c[2] ? 2 : 3;
+}
+function nombreTramo(i) {
+  const c = cortesTramos();
+  return [`Menos de ${c[0]} días`, `${c[0]} a ${c[1]-1} días`, `${c[1]} a ${c[2]-1} días`, `${c[2]} días o más`, 'Sin fecha'][i];
+}
+const COLOR_TRAMO = ['#34c759', '#f5c400', '#ff9f0a', '#ff453a', '#8e8e93'];
+async function guardarObjetivoDias(v) {
+  const { data: { user } } = await window.SB.auth.getUser();
+  const { error } = await window.SB.from('panel_parametros').upsert({
+    clave: 'pendiente_objetivo_dias', valor: v, actualizado: new Date().toISOString(), actualizado_por: user ? user.email : null,
+  });
+  if (error) throw error;
+  OBJETIVO_DIAS = v;
+}
+document.addEventListener('change', async ev => {
+  if (!ev.target || ev.target.id !== 'p-objetivo-dias') return;
+  const v = Math.max(0, Math.round(+ev.target.value || 0));
+  try { await guardarObjetivoDias(v); render(); }
+  catch (e) { alert('No se pudo guardar el objetivo: ' + (e.message || e) + '\n\n¿Se corrió setup_panel_parametros.sql en Supabase?'); }
+});
+document.addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target && ev.target.id === 'p-objetivo-dias') ev.target.blur(); });
+document.addEventListener('click', async ev => {
+  const t = ev.target.closest && ev.target.closest('[data-tramo],#p-tramo-quitar,#p-tramos-editar,#p-tramos-guardar,#p-tramos-cancelar');
+  const sec = document.getElementById('section-pendiente');
+  if (!t || !sec || !sec.contains(t)) return;
+  if (t.dataset.tramo !== undefined) { const i = +t.dataset.tramo; filtroTramo = filtroTramo === i ? null : i; render(); }
+  else if (t.id === 'p-tramo-quitar') { filtroTramo = null; render(); }
+  else if (t.id === 'p-tramos-editar') { editandoTramos = true; render(); }
+  else if (t.id === 'p-tramos-cancelar') { editandoTramos = false; render(); }
+  else if (t.id === 'p-tramos-guardar') {
+    const v = [1, 2, 3].map(i => Math.round(+document.getElementById('p-tramo-c' + i).value));
+    if (!(v[0] > 0 && v[0] < v[1] && v[1] < v[2])) { alert('Los cortes tienen que ser días crecientes, por ejemplo 20, 30 y 45.'); return; }
+    try { await guardarTramos(v); editandoTramos = false; filtroTramo = null; render(); }
+    catch (e) { alert('No se pudieron guardar los tramos: ' + (e.message || e) + '\n\n¿Se corrió setup_panel_parametros.sql en Supabase?'); }
+  }
+});
+
 function bucketDias(d) {
   if (d === null || d === undefined) return 'Sin fecha';
   if (d <= 7) return '0 a 7 días';
@@ -3010,6 +3081,7 @@ async function load() {
     if (!pR.ok) throw new Error('sin datos');
     PENDIENTES_ALL = await pR.json();
     META = mR.ok ? await mR.json() : {};
+    await cargarObjetivoDias();
 
     const empresas = [...new Set(PENDIENTES_ALL.map(p=>p.empresa))].filter(Boolean).sort();
     const wrap = document.getElementById('p-filtro-empresa-wrap');
@@ -3034,7 +3106,9 @@ function render() {
   const filtroSel = document.getElementById('p-filtro-empresa');
   const empresaFiltro = filtroSel ? filtroSel.value : '';
   empresaActual = empresaFiltro;
-  PENDIENTES = empresaFiltro ? PENDIENTES_ALL.filter(p=>p.empresa===empresaFiltro) : PENDIENTES_ALL;
+  const BASE = empresaFiltro ? PENDIENTES_ALL.filter(p=>p.empresa===empresaFiltro) : PENDIENTES_ALL;
+  PENDIENTES = filtroTramo === null ? BASE : BASE.filter(p => tramoDe(p.dias_pendiente) === filtroTramo);
+  if (!PENDIENTES.length && filtroTramo !== null) { filtroTramo = null; PENDIENTES = BASE; }
 
   if (!PENDIENTES.length) {
     document.getElementById('p-main').innerHTML = '<div class="empty-msg">🎉 No hay órdenes pendientes de facturación en este momento.</div>';
@@ -3045,13 +3119,54 @@ function render() {
   const montoDisp = PENDIENTES.reduce((s,p)=>s+(p.monto_disponible||0),0);
   const montoFab = PENDIENTES.reduce((s,p)=>s+(p.monto_a_fabricar||0),0);
   const ordenesUnicas = new Set(PENDIENTES.map(p=>p.orden)).size;
-  const diasProm = PENDIENTES.reduce((s,p)=>s+(p.dias_pendiente||0),0) / PENDIENTES.length;
+  // Antigüedad por ORDEN: cada orden cuenta una vez (días desde la fecha de la orden hasta hoy)
+  const diasPorOrden = new Map();
+  PENDIENTES.forEach(p => { const k = p.orden || ('s/n ' + (p.cliente||'')); diasPorOrden.set(k, Math.max(diasPorOrden.get(k) || 0, p.dias_pendiente || 0)); });
+  const diasLista = [...diasPorOrden.values()];
+  const diasProm = diasLista.length ? diasLista.reduce((s,d)=>s+d,0) / diasLista.length : 0;
+  const objetivo = objetivoDias();
+  const atraso = Math.max(0, Math.round(diasProm) - objetivo);
+  const fueraObj = diasLista.filter(d => d > objetivo).length;
+  const puedeEditarObj = document.documentElement.dataset.rol === 'admin' && !window.SIMULANDO;
 
-  let html = `<div class="kpis">
+  // Renglones por antigüedad (siempre sobre todo el pendiente de la empresa elegida)
+  const tramos = [0,1,2,3,4].map(i => ({ i, renglones:0, monto:0, disp:0, fab:0, ordenes:new Set() }));
+  BASE.forEach(p => { const t = tramos[tramoDe(p.dias_pendiente)];
+    t.renglones++; t.monto += p.monto_pendiente||0; t.disp += p.monto_disponible||0; t.fab += p.monto_a_fabricar||0; t.ordenes.add(p.orden); });
+  const montoBase = BASE.reduce((s,p)=>s+(p.monto_pendiente||0),0);
+  const esAdminP = document.documentElement.dataset.rol === 'admin' && !window.SIMULANDO;
+  const c = cortesTramos();
+  let htmlTramos = `<div class="p-drill-bar" style="margin-bottom:10px">
+      <div class="section-title" style="margin:0">Renglones pendientes por antigüedad<span class="ayuda" title="Cada renglón es un artículo de una orden pendiente de facturar. Los días se cuentan desde la fecha de la orden hasta hoy. Tocá un tramo para ver solo esos renglones en todo el panel (tablas, detalle y Excel/PDF).">?</span></div>
+      ${esAdminP && !editandoTramos ? '<button class="btn" id="p-tramos-editar" style="padding:5px 10px;font-size:12px">✎ Cambiar tramos</button>' : ''}
+    </div>`;
+  if (editandoTramos) htmlTramos += `<div class="kpi" style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span class="kpi-sub" style="margin:0">Cortes en días:</span>
+      ${[1,2,3].map(i=>`<input type="number" min="1" step="1" id="p-tramo-c${i}" value="${c[i-1]}" style="width:64px;padding:4px 6px;font:inherit;border:1px solid #888;border-radius:6px;background:transparent;color:inherit">`).join('')}
+      <span class="kpi-sub" style="margin:0">→ menos del 1.º · del 1.º al 2.º · del 2.º al 3.º · 3.º o más</span>
+      <button class="btn" id="p-tramos-guardar" style="background:var(--yellow);color:#000;font-weight:700">Guardar</button>
+      <button class="btn" id="p-tramos-cancelar">Cancelar</button></div>`;
+  htmlTramos += `<div class="kpis" style="margin-bottom:${filtroTramo===null?24:12}px">` + tramos.filter(t => t.i < 4 || t.renglones).map(t => {
+      const sel = filtroTramo === t.i, col = COLOR_TRAMO[t.i], pct = montoBase ? t.monto / montoBase * 100 : 0;
+      return `<div class="kpi" data-tramo="${t.i}" title="${t.renglones ? (sel ? 'Tocá para quitar el filtro' : 'Tocá para ver solo estos renglones') : ''}"
+        style="border-left-color:${col};cursor:${t.renglones?'pointer':'default'};${sel?`outline:2px solid ${col};outline-offset:-1px;`:''}${filtroTramo!==null&&!sel?'opacity:.55;':''}">
+        <div class="kpi-label" style="color:${col}">${esc(nombreTramo(t.i))}</div>
+        <div class="kpi-value">${fN(t.renglones)} <span style="font-size:13px;font-weight:600;color:var(--muted)">renglones</span></div>
+        <div class="kpi-sub">en ${fN(t.ordenes.size)} órdenes · <b>${fM(t.monto)}</b> (${pct.toFixed(0)}%)</div>
+        <div class="kpi-sub"><span style="color:#34c759">✅ ${fM(t.disp)}</span> · <span style="color:#ff453a">🏭 ${fM(t.fab)}</span></div>
+        <div style="height:4px;background:var(--border);border-radius:2px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${Math.min(100,pct).toFixed(1)}%;background:${col}"></div></div>
+      </div>`; }).join('') + `</div>`;
+  if (filtroTramo !== null) htmlTramos += `<div style="display:inline-flex;align-items:center;gap:8px;background:${COLOR_TRAMO[filtroTramo]};color:#000;font-weight:700;font-size:13px;padding:6px 12px;border-radius:999px;margin-bottom:20px">
+      Mostrando solo renglones de ${esc(nombreTramo(filtroTramo).toLowerCase())} <button id="p-tramo-quitar" title="Quitar filtro" style="background:#000;color:#fff;border:0;border-radius:50%;width:20px;height:20px;cursor:pointer;font-weight:700">✕</button></div>`;
+
+  let html = htmlTramos + `<div class="kpis">
     <div class="kpi"><div class="kpi-label">Monto pendiente de facturar<span class="ayuda" title="Cantidad ordenada menos cantidad ya facturada, en $ (proporcional al subtotal de cada línea). Incluye todo lo confirmado y no facturado, se haya entregado o no.">?</span></div><div class="kpi-value">${fM(montoTotal)}</div><div class="kpi-sub">${fN(ordenesUnicas)} órdenes</div></div>
     <div class="kpi" style="border-left-color:#34c759"><div class="kpi-label">✅ Disponible para facturar ya<span class="ayuda" title="Parte de lo pendiente cuya entrega ya tiene el stock reservado en Odoo (movimiento en estado 'Listo'/'Hecho'). Si el producto no maneja stock (servicio), se cuenta como disponible.">?</span></div><div class="kpi-value">${fM(montoDisp)}</div><div class="kpi-sub">${montoTotal?(montoDisp/montoTotal*100).toFixed(0):0}% del total — stock ya reservado</div></div>
     <div class="kpi" style="border-left-color:#ff453a"><div class="kpi-label">🏭 Falta comprar / fabricar<span class="ayuda" title="Parte de lo pendiente cuya entrega todavía está esperando stock (no reservado) en Odoo.">?</span></div><div class="kpi-value">${fM(montoFab)}</div><div class="kpi-sub">${montoTotal?(montoFab/montoTotal*100).toFixed(0):0}% del total — sin stock reservado</div></div>
-    <div class="kpi"><div class="kpi-label">Antigüedad promedio<span class="ayuda" title="Promedio de días transcurridos desde la fecha de confirmación de la orden (no desde la fecha de entrega ni de facturación).">?</span></div><div class="kpi-value">${diasProm.toFixed(0)} días</div><div class="kpi-sub">desde la fecha de la orden</div></div>
+    <div class="kpi"><div class="kpi-label">Antigüedad promedio<span class="ayuda" title="Promedio por orden: días desde la fecha de la orden de venta en Odoo hasta hoy. Cada orden pendiente cuenta una vez, sin importar cuántos artículos ni cuánta plata tenga.">?</span></div><div class="kpi-value">${diasProm.toFixed(0)} días</div><div class="kpi-sub">promedio de ${fN(diasLista.length)} órdenes, desde la fecha de la orden</div></div>
+    <div class="kpi" style="border-left-color:${atraso>0?'#ff453a':'#34c759'}"><div class="kpi-label">Atraso vs. objetivo<span class="ayuda" title="Antigüedad promedio menos el objetivo de días. Ej.: promedio 30 días y objetivo 15 = 15 días de atraso. Si el promedio está por debajo del objetivo, el atraso es 0.">?</span></div>
+      <div class="kpi-value" style="color:${atraso>0?'#ff453a':'#34c759'}">${atraso>0 ? atraso+' días' : 'En objetivo'}</div>
+      <div class="kpi-sub">Objetivo: ${puedeEditarObj ? `<input type="number" min="0" step="1" id="p-objetivo-dias" value="${objetivo}" title="Cambiá el objetivo y apretá Enter" style="width:52px;padding:1px 4px;font:inherit;border:1px solid #888;border-radius:4px;background:transparent;color:inherit">` : `<b>${objetivo}</b>`} días · ${fN(fueraObj)} órdenes lo superan</div></div>
   </div>`;
 
   // Drill-down: Vendedor (o Equipo) → Cliente → Artículo
