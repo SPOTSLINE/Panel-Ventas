@@ -513,9 +513,30 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
 #pg-obj-table .pg-obj-table { min-width: 760px; }
 .pg-fer { font-size: 11.5px; color: var(--muted-dark); margin: 4px 0 14px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
 .pg-fer b { color: #fff; }
-.pg-fer-edit input { width: 110px; background: rgba(255,255,255,.06); border: 1px solid var(--border-dark); border-radius: 6px; color: #fff; padding: 4px 8px; font: inherit; }
-.pg-fer-edit button { background: rgba(255,255,255,.1); color: #fff; border: 1px solid var(--border-dark); border-radius: 6px; padding: 4px 10px; font: inherit; font-weight: 700; cursor: pointer; }
-html[data-rol="lectura"] .pg-fer-edit, html[data-rol="vendedor"] .pg-fer-edit { display: none; }
+.pg-cal-btn { background: rgba(255,255,255,.08); color: #fff; border: 1px solid var(--border-dark); border-radius: 8px; padding: 5px 12px; font: inherit; font-weight: 700; cursor: pointer; }
+.pg-cal-btn:hover { border-color: var(--yellow); }
+.pg-cal { background: rgba(0,0,0,.18); border: 1px solid var(--border-dark); border-radius: 12px; padding: 14px; margin: -4px 0 16px; max-width: 360px; }
+.pg-cal-tit { font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 10px; }
+.pg-cal-tit b { color: var(--yellow); }
+.pg-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.pg-cal-h { text-align: center; font-size: 10.5px; font-weight: 700; color: var(--muted-dark); padding-bottom: 2px; }
+.pg-cal-d { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 700; border: 2px solid transparent; color: #fff; padding: 0; }
+button.pg-cal-d { cursor: pointer; }
+.pg-cal-d.hab { background: rgba(255,255,255,.08); }
+button.pg-cal-d.hab:hover { background: rgba(246,233,33,.25); }
+.pg-cal-d.fer { background: #ff453a; color: #fff; }
+.pg-cal-d.finde { background: transparent; color: rgba(255,255,255,.25); }
+.pg-cal-d.pasado { opacity: .55; }
+.pg-cal-d.hoy { border-color: var(--yellow); opacity: 1; }
+.pg-cal-ref { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 10.5px; color: var(--muted-dark); margin-top: 10px; }
+.pg-cal-ref .r { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-left: 6px; }
+.pg-cal-ref .r:first-child { margin-left: 0; }
+.pg-cal-ref .hab { background: rgba(255,255,255,.2); } .pg-cal-ref .fer { background: #ff453a; }
+.pg-cal-ref .finde { border: 1px solid rgba(255,255,255,.2); } .pg-cal-ref .hoy { border: 2px solid var(--yellow); }
+.pg-cal-acc { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.pg-cal-acc button { background: var(--yellow); color: var(--ink, #1D1D1F); border: none; border-radius: 8px; padding: 7px 14px; font: inherit; font-weight: 800; cursor: pointer; }
+.pg-cal-acc button:disabled { background: rgba(255,255,255,.1); color: var(--muted-dark); cursor: default; }
+.pg-cal-pend { font-size: 11px; color: #ff9f0a; } .pg-cal-pend.ok { color: var(--muted-dark); }
 .pg-obj-det summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--yellow); margin: 4px 0 12px; }
 .pg-obj-det .pg-obj-note { margin: 0 0 12px; }
 @media (max-width: 700px) { .pg-hero { grid-template-columns: 1fr; gap: 10px; } .pg-hero-pct { font-size: 52px; } }
@@ -1875,23 +1896,73 @@ const PanelGeneral = (function() {
       ${barraFeriados(ritmo)}`;
   }
 
+  // ── Almanaque de feriados ──
+  let calAbierto = false, calSel = null, calMes = null;
+  const puedeEditarFeriados = () => !['lectura', 'vendedor'].includes(document.documentElement.dataset.rol || '');
+
   function barraFeriados(ritmo) {
     if (!ritmo) return '';
     const mesKey = mesObjetivoActual();
     const fer = ritmo.feriados;
+    if (calMes !== mesKey) { calMes = mesKey; calSel = null; }
     return `<div class="pg-fer"><span>📅 <b>${ritmo.total}</b> días hábiles en el mes (lunes a viernes${fer.length ? ', sin feriados: ' + fer.join(', ') : ', sin feriados cargados'}).</span>
-      <span class="pg-fer-edit">Feriados del mes: <input id="pg-feriados" data-mes="${mesKey}" value="${fer.join(', ')}" placeholder="ej: 20, 23" inputmode="numeric">
-      <button type="button" id="pg-feriados-ok">Guardar</button></span></div>`;
+      <button type="button" class="pg-cal-btn" id="pg-cal-toggle">${calAbierto ? 'Cerrar almanaque' : (puedeEditarFeriados() ? '📅 Marcar feriados' : '📅 Ver almanaque')}</button></div>
+      <div id="pg-cal">${calAbierto ? calendarioHTML(mesKey) : ''}</div>`;
+  }
+
+  function calendarioHTML(mesKey) {
+    const [y, m] = mesKey.split('-').map(Number);
+    const ult = new Date(y, m, 0).getDate();
+    const guardados = new Set(feriadosDelMes(mesKey));
+    const sel = calSel || guardados;
+    const hoy = new Date();
+    const esMesActual = hoy.getFullYear() === y && hoy.getMonth() + 1 === m;
+    const editable = puedeEditarFeriados();
+    const offset = (new Date(y, m - 1, 1).getDay() + 6) % 7;          // lunes primero
+    let celdas = '';
+    for (let i = 0; i < offset; i++) celdas += '<div></div>';
+    let habiles = 0;
+    for (let d = 1; d <= ult; d++) {
+      const dow = new Date(y, m - 1, d).getDay();
+      const finde = dow === 0 || dow === 6;
+      const fer = !finde && sel.has(d);
+      if (!finde && !fer) habiles++;
+      const cls = ['pg-cal-d', finde ? 'finde' : fer ? 'fer' : 'hab',
+        esMesActual && d === hoy.getDate() ? 'hoy' : '', esMesActual && d < hoy.getDate() ? 'pasado' : ''].join(' ');
+      celdas += finde || !editable
+        ? `<div class="${cls}">${d}</div>`
+        : `<button type="button" class="${cls}" data-dia="${d}" title="${fer ? 'Feriado: tocá para quitarlo' : 'Tocá para marcarlo como feriado'}">${d}</button>`;
+    }
+    const cambios = calSel && ([...calSel].sort((a, b) => a - b).join() !== [...guardados].sort((a, b) => a - b).join());
+    return `<div class="pg-cal">
+      <div class="pg-cal-tit">${labelMes(mesKey)} · <b>${habiles}</b> días hábiles</div>
+      <div class="pg-cal-grid">${['L','M','M','J','V','S','D'].map(x => `<div class="pg-cal-h">${x}</div>`).join('')}${celdas}</div>
+      <div class="pg-cal-ref"><span class="r hab"></span>Hábil <span class="r fer"></span>Feriado <span class="r finde"></span>Fin de semana <span class="r hoy"></span>Hoy</div>
+      ${editable ? `<div class="pg-cal-acc"><button type="button" id="pg-cal-save" ${cambios ? '' : 'disabled'}>💾 Guardar feriados</button>
+        ${cambios ? '<span class="pg-cal-pend">Hay cambios sin guardar</span>' : '<span class="pg-cal-pend ok">Tocá un día para marcarlo o desmarcarlo</span>'}</div>` : ''}
+    </div>`;
   }
 
   document.addEventListener('click', async ev => {
-    if (!ev.target || ev.target.id !== 'pg-feriados-ok') return;
-    const inp = document.getElementById('pg-feriados'), btn = ev.target;
-    const mesKey = inp.dataset.mes, [y, m] = mesKey.split('-').map(Number), ult = new Date(y, m, 0).getDate();
-    const dias = [...new Set((inp.value.match(/\d+/g) || []).map(Number).filter(d => d >= 1 && d <= ult))].sort((a,b)=>a-b);
-    btn.disabled = true; btn.textContent = 'Guardando…';
-    try { await guardarFeriados(mesKey, dias); renderObjetivos(); }
-    catch (e) { alert('No se pudieron guardar los feriados: ' + (e.message || e)); btn.disabled = false; btn.textContent = 'Guardar'; }
+    const t = ev.target && ev.target.closest ? ev.target.closest('#pg-cal-toggle, #pg-cal-save, .pg-cal-d[data-dia]') : null;
+    if (!t) return;
+    const mesKey = mesObjetivoActual();
+    if (t.id === 'pg-cal-toggle') {
+      calAbierto = !calAbierto; calSel = null;
+      renderObjetivos(); return;
+    }
+    if (t.dataset.dia) {
+      if (!calSel) calSel = new Set(feriadosDelMes(mesKey));
+      const d = +t.dataset.dia;
+      calSel.has(d) ? calSel.delete(d) : calSel.add(d);
+      document.getElementById('pg-cal').innerHTML = calendarioHTML(mesKey);
+      return;
+    }
+    if (t.id === 'pg-cal-save') {
+      t.disabled = true; t.textContent = 'Guardando…';
+      try { await guardarFeriados(mesKey, [...(calSel || [])].sort((a, b) => a - b)); calSel = null; renderObjetivos(); }
+      catch (e) { alert('No se pudieron guardar los feriados: ' + (e.message || e)); t.disabled = false; t.textContent = '💾 Guardar feriados'; }
+    }
   });
 
   function guardarObjetivos() {
