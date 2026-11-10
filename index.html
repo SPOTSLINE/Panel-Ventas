@@ -511,6 +511,11 @@ code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; 
 .pg-hero-msg b { color: #fff; }
 #pg-obj-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 #pg-obj-table .pg-obj-table { min-width: 760px; }
+.pg-fer { font-size: 11.5px; color: var(--muted-dark); margin: 4px 0 14px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.pg-fer b { color: #fff; }
+.pg-fer-edit input { width: 110px; background: rgba(255,255,255,.06); border: 1px solid var(--border-dark); border-radius: 6px; color: #fff; padding: 4px 8px; font: inherit; }
+.pg-fer-edit button { background: rgba(255,255,255,.1); color: #fff; border: 1px solid var(--border-dark); border-radius: 6px; padding: 4px 10px; font: inherit; font-weight: 700; cursor: pointer; }
+html[data-rol="lectura"] .pg-fer-edit, html[data-rol="vendedor"] .pg-fer-edit { display: none; }
 .pg-obj-det summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--yellow); margin: 4px 0 12px; }
 .pg-obj-det .pg-obj-note { margin: 0 0 12px; }
 @media (max-width: 700px) { .pg-hero { grid-template-columns: 1fr; gap: 10px; } .pg-hero-pct { font-size: 52px; } }
@@ -1635,9 +1640,44 @@ const PanelGeneral = (function() {
     return meses[meses.length-1] || '';
   }
 
-  // Pesos de cada semana del mes sobre el objetivo total (ajustable acá si cambia la distribución)
-  const SEMANA_PESOS = [23, 23, 25, 29];
 
+  // Feriados (los carga un admin en el recuadro del objetivo). Tabla panel_parametros, clave 'feriado_AAAA-MM-DD'.
+  let FERIADOS = new Set();
+  async function cargarFeriados() {
+    try {
+      const { data, error } = await window.SB.from('panel_parametros').select('clave').like('clave', 'feriado_%');
+      if (!error && data) FERIADOS = new Set(data.map(r => r.clave.slice(8)));
+    } catch (e) {}
+  }
+  async function guardarFeriados(mesKey, dias) {
+    const { data: { user } } = await window.SB.auth.getUser();
+    const del = await window.SB.from('panel_parametros').delete().like('clave', `feriado_${mesKey}-%`);
+    if (del.error) throw del.error;
+    if (dias.length) {
+      const ahora = new Date().toISOString();
+      const { error } = await window.SB.from('panel_parametros').upsert(dias.map(d => ({
+        clave: `feriado_${mesKey}-${String(d).padStart(2,'0')}`, valor: 1, actualizado: ahora, actualizado_por: user ? user.email : null })));
+      if (error) throw error;
+    }
+    [...FERIADOS].filter(f => f.startsWith(mesKey + '-')).forEach(f => FERIADOS.delete(f));
+    dias.forEach(d => FERIADOS.add(`${mesKey}-${String(d).padStart(2,'0')}`));
+  }
+  function feriadosDelMes(mesKey) {
+    return [...FERIADOS].filter(f => f.startsWith(mesKey + '-')).map(f => +f.slice(8)).sort((a,b)=>a-b);
+  }
+  // Dias habiles del mes: lunes a viernes menos los feriados cargados
+  function diasHabiles(mesKey) {
+    const [y, m] = mesKey.split('-').map(Number);
+    const out = [], ult = new Date(y, m, 0).getDate();
+    for (let d = 1; d <= ult; d++) {
+      const dow = new Date(y, m-1, d).getDay();
+      const k = `${mesKey}-${String(d).padStart(2,'0')}`;
+      if (dow !== 0 && dow !== 6 && !FERIADOS.has(k)) out.push(d);
+    }
+    return out;
+  }
+
+  // Ritmo esperado = dias habiles transcurridos (hoy incluido) / dias habiles del mes
   function ritmoEsperado(mesKey) {
     if (!mesKey) return null;
     const hoy = new Date();
@@ -1645,23 +1685,16 @@ const PanelGeneral = (function() {
     const esMesActual = hoy.getFullYear() === y && (hoy.getMonth()+1) === m;
     const esMesFuturo = new Date(y, m-1, 1) > new Date(hoy.getFullYear(), hoy.getMonth(), 1);
     if (esMesFuturo) return null; // no aplica todavia
-
-    let semanaIdx;
-    if (esMesActual) {
-      const dia = hoy.getDate();
-      semanaIdx = dia <= 7 ? 0 : dia <= 14 ? 1 : dia <= 21 ? 2 : 3;
-    } else {
-      semanaIdx = 3; // mes ya cerrado -> se compara contra el 100% del objetivo
-    }
-    const esperado = SEMANA_PESOS.slice(0, semanaIdx+1).reduce((a,b)=>a+b, 0);
-    return { semana: semanaIdx+1, esperado, mesCerrado: !esMesActual };
+    const hab = diasHabiles(mesKey);
+    const total = hab.length || 1;
+    const hechos = esMesActual ? hab.filter(d => d <= hoy.getDate()).length : total;
+    return { hechos, total, restantes: total - hechos, esperado: Math.round(hechos / total * 100),
+             mesCerrado: !esMesActual, feriados: feriadosDelMes(mesKey) };
   }
 
-  // Gradiente continuo rojo -> amarillo -> verde segun cuanto se aleja del ritmo esperado
+  // Verde: en ritmo o adelante · Amarillo: hasta 10 puntos atras · Rojo: mas de 10 puntos atras
   function colorRitmo(diff) {
-    const norm = Math.max(-1, Math.min(1, diff / 15));
-    const hue = 60 + norm * 60; // -15 -> 0 (rojo) · 0 -> 60 (amarillo) · +15 -> 120 (verde)
-    return `hsl(${hue}, 78%, 48%)`;
+    return diff >= 0 ? '#34c759' : diff >= -10 ? '#f5c400' : '#ff453a';
   }
 
   function formatMiles(n) {
@@ -1719,7 +1752,7 @@ const PanelGeneral = (function() {
     if (ritmo) {
       ritmoNote = ritmo.mesCerrado
         ? `<div class="pg-obj-ritmo-note">Mes cerrado — comparando contra el 100% del objetivo.</div>`
-        : `<div class="pg-obj-ritmo-note">Estamos en la <b>semana ${ritmo.semana} de 4</b> del mes — a esta altura, cada equipo debería llevar acumulado el <b>${ritmo.esperado}%</b> de su objetivo base.</div>`;
+        : `<div class="pg-obj-ritmo-note">Vamos por el día hábil <b>${ritmo.hechos} de ${ritmo.total}</b> del mes — a esta altura, cada equipo debería llevar acumulado el <b>${ritmo.esperado}%</b> de su objetivo base.</div>`;
     }
 
     const cols = [
@@ -1738,7 +1771,7 @@ const PanelGeneral = (function() {
     }).join('') + '</tr></thead><tbody>';
 
     filas.forEach(({eq, venta, base, superador, pct, falta}) => {
-      const pctColor = pct===null ? '#6e6e73' : colorRitmo(pct-100);
+      const pctColor = pct===null ? '#6e6e73' : colorRitmo(ritmo ? pct - ritmo.esperado : pct - 100);
       const superadorBadge = pct!==null && pct>=115 ? ' 🎉' : '';
 
       let ritmoCell = '<span style="color:var(--muted-dark)">—</span>';
@@ -1814,8 +1847,9 @@ const PanelGeneral = (function() {
     else if (pct >= 100) msg = `✅ <b>Objetivo cumplido.</b> Faltan ${fM(faltaSup)} para el superador.`;
     else if (ritmo && !ritmo.mesCerrado) {
       const d = pct - ritmo.esperado;
-      msg = `Semana <b>${ritmo.semana} de 4</b>: a esta altura habría que llevar el <b>${ritmo.esperado}%</b>. ` +
-        (d >= 0 ? `Vamos <b style="color:${col}">${d.toFixed(0)} puntos adelante</b> del ritmo.` : `Vamos <b style="color:${col}">${Math.abs(d).toFixed(0)} puntos atrás</b> del ritmo.`);
+      msg = `Día hábil <b>${ritmo.hechos} de ${ritmo.total}</b>: a esta altura habría que llevar el <b>${ritmo.esperado}%</b>. ` +
+        (d >= 0 ? `Vamos <b style="color:${col}">${d.toFixed(0)} puntos adelante</b> del ritmo.` : `Vamos <b style="color:${col}">${Math.abs(d).toFixed(0)} puntos atrás</b> del ritmo.`) +
+        (ritmo.restantes > 0 ? ` Para llegar al objetivo hay que vender <b>${fM(falta / ritmo.restantes)}</b> por día hábil (quedan ${ritmo.restantes}).` : '');
     } else msg = `Mes cerrado: quedó en el <b>${pct.toFixed(0)}%</b> del objetivo.`;
     const otros = filas.length - conObj.length;
     el.innerHTML = `<div class="pg-hero">
@@ -1837,8 +1871,28 @@ const PanelGeneral = (function() {
         <div class="pg-hero-mark cien bot" style="left:${x(100)}"><span>100%</span></div>
         <div class="pg-hero-mark sup bot" style="left:${x(115)}"><span>115%</span></div>
       </div>
-      ${otros ? `<div class="pg-obj-hint" style="margin-top:-6px">${otros} equipo${otros>1?'s':''} sin objetivo cargado no entra${otros>1?'n':''} en el total.</div>` : ''}`;
+      ${otros ? `<div class="pg-obj-hint" style="margin-top:-6px">${otros} equipo${otros>1?'s':''} sin objetivo cargado no entra${otros>1?'n':''} en el total.</div>` : ''}
+      ${barraFeriados(ritmo)}`;
   }
+
+  function barraFeriados(ritmo) {
+    if (!ritmo) return '';
+    const mesKey = mesObjetivoActual();
+    const fer = ritmo.feriados;
+    return `<div class="pg-fer"><span>📅 <b>${ritmo.total}</b> días hábiles en el mes (lunes a viernes${fer.length ? ', sin feriados: ' + fer.join(', ') : ', sin feriados cargados'}).</span>
+      <span class="pg-fer-edit">Feriados del mes: <input id="pg-feriados" data-mes="${mesKey}" value="${fer.join(', ')}" placeholder="ej: 20, 23" inputmode="numeric">
+      <button type="button" id="pg-feriados-ok">Guardar</button></span></div>`;
+  }
+
+  document.addEventListener('click', async ev => {
+    if (!ev.target || ev.target.id !== 'pg-feriados-ok') return;
+    const inp = document.getElementById('pg-feriados'), btn = ev.target;
+    const mesKey = inp.dataset.mes, [y, m] = mesKey.split('-').map(Number), ult = new Date(y, m, 0).getDate();
+    const dias = [...new Set((inp.value.match(/\d+/g) || []).map(Number).filter(d => d >= 1 && d <= ult))].sort((a,b)=>a-b);
+    btn.disabled = true; btn.textContent = 'Guardando…';
+    try { await guardarFeriados(mesKey, dias); renderObjetivos(); }
+    catch (e) { alert('No se pudieron guardar los feriados: ' + (e.message || e)); btn.disabled = false; btn.textContent = 'Guardar'; }
+  });
 
   function guardarObjetivos() {
     const mesKey = mesObjetivoActual();
@@ -1864,6 +1918,7 @@ const PanelGeneral = (function() {
   }
 
   load();
+  cargarFeriados().then(() => { if (VENTAS.length) renderObjetivos(); });
   return { render };
 })();
 </script>
