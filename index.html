@@ -1666,22 +1666,24 @@ const PanelGeneral = (function() {
   let FERIADOS = new Set();
   async function cargarFeriados() {
     try {
-      const { data, error } = await window.SB.from('panel_parametros').select('clave').like('clave', 'feriado_%');
-      if (!error && data) FERIADOS = new Set(data.map(r => r.clave.slice(8)));
+      // valor 1 = feriado, 0 = desmarcado (no se borra: la tabla no deja borrar filas)
+      const { data, error } = await window.SB.from('panel_parametros').select('clave,valor').like('clave', 'feriado_%');
+      if (!error && data) FERIADOS = new Set(data.filter(r => +r.valor === 1).map(r => r.clave.slice(8)));
     } catch (e) {}
   }
   async function guardarFeriados(mesKey, dias) {
+    // Se escribe TODO el mes: 1 en los feriados y 0 en el resto de los días (así lo desmarcado queda desmarcado)
     const { data: { user } } = await window.SB.auth.getUser();
-    const del = await window.SB.from('panel_parametros').delete().like('clave', `feriado_${mesKey}-%`);
-    if (del.error) throw del.error;
-    if (dias.length) {
-      const ahora = new Date().toISOString();
-      const { error } = await window.SB.from('panel_parametros').upsert(dias.map(d => ({
-        clave: `feriado_${mesKey}-${String(d).padStart(2,'0')}`, valor: 1, actualizado: ahora, actualizado_por: user ? user.email : null })));
-      if (error) throw error;
-    }
-    [...FERIADOS].filter(f => f.startsWith(mesKey + '-')).forEach(f => FERIADOS.delete(f));
-    dias.forEach(d => FERIADOS.add(`${mesKey}-${String(d).padStart(2,'0')}`));
+    const [y, m] = mesKey.split('-').map(Number), ult = new Date(y, m, 0).getDate();
+    const ahora = new Date().toISOString(), quien = user ? user.email : null, si = new Set(dias);
+    const filas = [];
+    for (let d = 1; d <= ult; d++) filas.push({ clave: `feriado_${mesKey}-${String(d).padStart(2,'0')}`,
+      valor: si.has(d) ? 1 : 0, actualizado: ahora, actualizado_por: quien });
+    const { error } = await window.SB.from('panel_parametros').upsert(filas);
+    if (error) throw error;
+    await cargarFeriados();                      // se relee de Supabase: lo que se ve es lo que quedó guardado
+    const quedo = feriadosDelMes(mesKey).join(), pedido = [...si].sort((a, b) => a - b).join();
+    if (quedo !== pedido) throw new Error('Supabase no guardó todos los cambios (quedó: ' + (quedo || 'ninguno') + ').');
   }
   function feriadosDelMes(mesKey) {
     return [...FERIADOS].filter(f => f.startsWith(mesKey + '-')).map(f => +f.slice(8)).sort((a,b)=>a-b);
